@@ -39,12 +39,12 @@ namespace rapic
   enum class video_format
   {
       unknown
-    , _6
-    , _16
-    , _32
-    , _64
-    , _160
-    , _256
+    , _6 = 6
+    , _16 = 16
+    , _32 = 32
+    , _64 = 64
+    , _160 = 160
+    , _256 = 256
     //, raw_256 - specified as an enumeration in rapic and rowlf but unused by rapic
   };
 
@@ -157,7 +157,16 @@ namespace rapic
     long                volumeid        = -1;
     std::string         volumelabel;
     long                first_ray       = -1;
+
+    size_t              data_rows       = 0;
+    size_t              data_cols       = 0;
     std::vector<int>    data;
+
+    scan() = default;
+    scan(std::istream& in);
+
+  private:
+    auto parse_header(std::string const& key, std::string const& value) -> void;
   };
 
   /// Rapic Data Server client connection manager
