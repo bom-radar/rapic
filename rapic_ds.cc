@@ -212,7 +212,12 @@ scan::scan(std::istream& in)
 
           //  absolute pixel value
           if (cur.type == enc_type::value)
-            out[bin++] = prev = cur.val;
+          {
+            if (bin < data_cols)
+              out[bin++] = prev = cur.val;
+            else
+              throw std::runtime_error{"scan data overflow (ascii abs)"};
+          }
           // run length encoding of the previous value
           else if (cur.type == enc_type::digit)
           {
@@ -222,22 +227,29 @@ scan::scan(std::istream& in)
               count *= 10;
               count += lookup[(unsigned char)*++i].val;
             }
+            if (bin + count > data_cols)
+              throw std::runtime_error{"scan data overflow (ascii rle)"};
             for (int j = 0; j < count; ++j)
               out[bin++] = prev;
           }
           // delta encoding
+          // silently ignore potential overflow caused second half of a delta encoding at end of ray assuming it
+          // is just an artefact of the encoding process
           else if (cur.type == enc_type::delta)
           {
-            out[bin++] = prev += cur.val;
-            out[bin++] = prev += cur.val2;
+            if (bin < data_cols)
+              out[bin++] = prev += cur.val;
+            else
+              throw std::runtime_error{"scan data overflow (ascii delta)"};
+
+            if (bin < data_cols)
+              out[bin++] = prev += cur.val2;
+            else if (i + 1 != buf1.end())
+              throw std::runtime_error{"scan data overflow (ascii delta)"};
           }
           else
             throw std::runtime_error("invalid character encountered in ray encoding");
         }
-
-        // sanity check (too late - overrun has already occured at this point)
-        if (bin > data_cols)
-          throw std::runtime_error("BUFFER OVERRUN");
       }
       // binary encoding
       else
@@ -280,16 +292,16 @@ scan::scan(std::istream& in)
             size_t count = (unsigned char) in.get();
             if (count == 0)
               break;
+            if (bin + count > data_cols)
+              throw std::runtime_error{"scan data overflow (binary rle)"};
             for (size_t i = 0; i < count; ++i)
               out[bin++] = val;
           }
-          else
+          else if (bin < data_cols)
             out[bin++] = val;
+          else
+            throw std::runtime_error{"scan data overflow (binary abs)"};
         }
-
-        // sanity check (too late - overrun has already occured at this point)
-        if (bin > data_cols)
-          throw std::runtime_error("BUFFER OVERRUN");
       }
     }
     // header field
@@ -312,7 +324,18 @@ scan::scan(std::istream& in)
       // split into header name and value (name in buf1, value in buf2)
       auto pos1 = buf1.find(':');
       if (pos1 == std::string::npos)
+      {
+#if 1
+        std::cerr << "Invalid header detected.  station " << stnid 
+          << " product " << (int) product
+          << " tilt " << tilt
+          << " pass " << pass
+          << std::endl;
+    //      << " rays_so_far " << rays_so_far
+    //      << " data " << buf1 << std::endl;
+#endif
         throw std::runtime_error("invalid header");
+      }
       auto pos2 = buf1.find_first_not_of(' ', pos1 + 1);
       buf2.assign(buf1, pos2, std::string::npos);
       buf1.resize(pos1);
@@ -582,6 +605,9 @@ void scan::parse_header(std::string const& key, std::string const& value)
 #if 0
   else
     trace::warning() << "unknown header encountered: " << key << " = " << value;
+#else
+  else
+    std::cerr << "unknown header encountered: " << key << " = " << value << std::endl;
 #endif
 }
 
@@ -1021,20 +1047,29 @@ auto client::decode(scan& msg) -> void
   auto const data = &buffer_[rcount_ % capacity_];
 
   // TEMP horrible slow implementation.  need to remove streams
+  // also need to allow in place re-parsing to save memory
   std::string buf;
-  buf.reserve(cur_size_);
-  auto pos = rcount_ % capacity_;
-  if (pos + cur_size_ > capacity_)
+  try
   {
-    buf.assign(reinterpret_cast<char const*>(&buffer_[pos]), capacity_ - pos);
-    buf.append(reinterpret_cast<char const*>(&buffer_[0]), cur_size_ - (capacity_ - pos));
+    buf.reserve(cur_size_);
+    auto pos = rcount_ % capacity_;
+    if (pos + cur_size_ > capacity_)
+    {
+      buf.assign(reinterpret_cast<char const*>(&buffer_[pos]), capacity_ - pos);
+      buf.append(reinterpret_cast<char const*>(&buffer_[0]), cur_size_ - (capacity_ - pos));
+    }
+    else
+    {
+      buf.assign(reinterpret_cast<char const*>(&buffer_[pos]), cur_size_);
+    }
+    std::istringstream in(buf);
+    msg = scan{in};
   }
-  else
+  catch (std::exception& err)
   {
-    buf.assign(reinterpret_cast<char const*>(&buffer_[pos]), cur_size_);
+    //std::cerr << "bad message\n" << buf << "\nend bad message\n";
+    throw;
   }
-  std::istringstream in(buf);
-  msg = scan{in};
 }
 
 auto client::check_cur_type(message_type type) -> void

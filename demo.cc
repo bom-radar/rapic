@@ -14,6 +14,8 @@
 #include <cstring>
 #include <ctime>
 
+#include <fstream>
+
 auto handle_rapic_messages(rapic::client& con) -> void
 {
   rapic::message_type type;
@@ -29,6 +31,7 @@ auto handle_rapic_messages(rapic::client& con) -> void
       }
       break;
     case rapic::message_type::scan:
+      try
       {
         rapic::scan msg;
         con.decode(msg);
@@ -37,7 +40,13 @@ auto handle_rapic_messages(rapic::client& con) -> void
           << " tilt " << msg.tilt << "/" << msg.tilt_count
           << " pass " << msg.pass << "/" << msg.pass_count
           << " " << msg.video
+          << " ts " << msg.timestamp
+          << " volumelabel " << msg.volumelabel
           << std::endl;
+      }
+      catch (std::exception& err)
+      {
+        std::cerr << "error decoding scan: " << err.what() << std::endl;
       }
       break;
     }
@@ -56,12 +65,21 @@ int main(int argc, char const* argv[])
 
   try
   {
+#if 0
+    std::ifstream in{"tindal_bad"};
+    rapic::scan scan{in};
+
+    std::cout << "read scan okay" << std::endl;
+
+#else
     // connect to GPATS
     rapic::client con;
 
+#if 0
     con.add_filter(2, rapic::product_type::volume);
     con.add_filter(3, rapic::product_type::volume);
     con.add_filter(70, rapic::product_type::volume);
+#endif
 
     con.connect("cmssdev.bom.gov.au", "15555");
 
@@ -78,6 +96,7 @@ int main(int argc, char const* argv[])
       // handle remaining messages and return to polling
       handle_rapic_messages(con);
     }
+#endif
   }
   catch (std::exception& err)
   {
