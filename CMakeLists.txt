@@ -52,6 +52,13 @@ foreach(p LIB INCLUDE CMAKE)
   endif()
 endforeach()
 
+# external dependencies
+find_package(rainutil REQUIRED)
+include_directories(${RAINUTIL_INCLUDE_DIRS})
+
+find_package(rainhdf REQUIRED)
+include_directories(${RAINHDF_INCLUDE_DIRS})
+
 # extract sourcee tree version information from git
 find_package(Git)
 if(GIT_FOUND)
@@ -74,6 +81,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -pedantic -Wextra -Wno-unused-para
 
 # build our library
 add_library(rapic_ds SHARED rapic_ds.cc rapic_ds.h)
+target_link_libraries(rapic_ds ${RAINUTIL_LIBRARIES} ${RAINHDF_LIBRARIES})
 set_target_properties(rapic_ds PROPERTIES VERSION "${RAPIC_DS_VERSION}")
 set_target_properties(rapic_ds PROPERTIES PUBLIC_HEADER rapic_ds.h)
 install(TARGETS rapic_ds

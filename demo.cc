@@ -8,6 +8,8 @@
  *----------------------------------------------------------------------------*/
 #include "rapic_ds.h"
 
+#include <rainutil/trace.h>
+
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -15,6 +17,8 @@
 #include <ctime>
 
 #include <fstream>
+
+using namespace rainfields;
 
 auto handle_rapic_messages(rapic::client& con) -> void
 {
@@ -63,6 +67,8 @@ int main(int argc, char const* argv[])
     return EXIT_SUCCESS;
   }
 
+  trace::set_min_level(trace::level::debug);
+
   try
   {
 #if 0
@@ -75,6 +81,7 @@ int main(int argc, char const* argv[])
     // connect to GPATS
     rapic::client con;
 
+    con.add_filter(-1, rapic::product_type::volume);
 #if 0
     con.add_filter(2, rapic::product_type::volume);
     con.add_filter(3, rapic::product_type::volume);

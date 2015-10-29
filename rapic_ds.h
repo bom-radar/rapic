@@ -8,6 +8,10 @@
  *----------------------------------------------------------------------------*/
 #pragma once
 
+#include <rainutil/array.h>
+#include <rainutil/real.h>
+#include <rainutil/timestamp.h>
+
 #include <atomic>
 #include <bitset>
 #include <cstdint>
@@ -15,9 +19,11 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <list>
 
-namespace rapic
-{
+namespace rainfields {
+namespace rapic {
+
   /// Get the SCM release tag that the library was built from
   auto release_tag() -> char const*;
 
@@ -36,6 +42,8 @@ namespace rapic
   };
 
   /// Data formats
+  /** It is important that these have the value corresponding to their name - they are used as raw integers
+   *  occasionally (look for static_cast's involving the 'scan::vidres' member. */
   enum class video_format
   {
       unknown
@@ -96,71 +104,70 @@ namespace rapic
   /// Radar product message
   struct scan
   {
-    double              angle1          = std::numeric_limits<double>::quiet_NaN();
-    double              angle2          = std::numeric_limits<double>::quiet_NaN();
+    double              angle1          = nan<double>();
+    double              angle2          = nan<double>();
     bool                angleincreasing = true;
-    double              anglerate       = std::numeric_limits<double>::quiet_NaN();
-    double              angres          = std::numeric_limits<double>::quiet_NaN();
-    double              antdiam         = std::numeric_limits<double>::quiet_NaN();
-    double              azcorr          = std::numeric_limits<double>::quiet_NaN();
-    double              azim            = std::numeric_limits<double>::quiet_NaN();
+    double              anglerate       = nan<double>();
+    double              angres          = nan<double>();
+    double              antdiam         = nan<double>();
+    double              azcorr          = nan<double>();
+    double              azim            = nan<double>();
     long                compppiid       = -1;
     std::string         copyright;
     long                country         = -1;
     long                date            = -1;
-    double              dbm2dbz         = std::numeric_limits<double>::quiet_NaN();
+    double              dbm2dbz         = nan<double>();
     std::vector<double> dbmlvl;
     std::vector<double> dbzlvl;
-    double              elcorr          = std::numeric_limits<double>::quiet_NaN();
-    double              elev            = std::numeric_limits<double>::quiet_NaN();
-    double              endrng          = std::numeric_limits<double>::quiet_NaN();
-    double              frequency       = std::numeric_limits<double>::quiet_NaN();
+    double              elcorr          = nan<double>();
+    double              elev            = nan<double>();
+    double              endrng          = nan<double>();
+    double              frequency       = nan<double>();
     std::string         fault;
-    double              hbeamwidth      = std::numeric_limits<double>::quiet_NaN();
-    double              height          = std::numeric_limits<double>::quiet_NaN();
+    double              hbeamwidth      = nan<double>();
+    double              height          = nan<double>();
     dual_prf_strategy   hiprf           = dual_prf_strategy::unknown;
     image_format        imgfmt          = image_format::unknown;
-    double              latitude        = std::numeric_limits<double>::quiet_NaN();
-    double              longitude       = std::numeric_limits<double>::quiet_NaN();
+    double              latitude        = nan<double>();
+    double              longitude       = nan<double>();
     std::string         name;
-    double              nyquist         = std::numeric_limits<double>::quiet_NaN();
+    double              nyquist         = nan<double>();
     long                pass            = -1;
     long                pass_count      = -1;
-    double              peakpower       = std::numeric_limits<double>::quiet_NaN();
-    double              peakpowerh      = std::numeric_limits<double>::quiet_NaN();
-    double              peakpowerv      = std::numeric_limits<double>::quiet_NaN();
+    double              peakpower       = nan<double>();
+    double              peakpowerh      = nan<double>();
+    double              peakpowerv      = nan<double>();
     polarisation_type   polarisation    = polarisation_type::unknown;
-    double              prf             = std::numeric_limits<double>::quiet_NaN();
+    double              prf             = nan<double>();
     product_type        product         = product_type::unknown;
-    double              pulselength     = std::numeric_limits<double>::quiet_NaN();
+    double              pulselength     = nan<double>();
     std::string         radartype;
-    double              rngres          = std::numeric_limits<double>::quiet_NaN();
-    double              rxgain_h        = std::numeric_limits<double>::quiet_NaN();
-    double              rxgain_v        = std::numeric_limits<double>::quiet_NaN();
-    double              rxnoise_h       = std::numeric_limits<double>::quiet_NaN();
-    double              rxnoise_v       = std::numeric_limits<double>::quiet_NaN();
-    double              startrng        = std::numeric_limits<double>::quiet_NaN();
+    double              rngres          = nan<double>();
+    double              rxgain_h        = nan<double>();
+    double              rxgain_v        = nan<double>();
+    double              rxnoise_h       = nan<double>();
+    double              rxnoise_v       = nan<double>();
+    double              startrng        = nan<double>();
     long                stn_num         = -1;
     long                stnid           = -1;
     long                tilt            = -1;
     long                tilt_count      = -1;
     std::pair<int, int> time            = {-1, -1};
-    time_t              timestamp       = 0;
+    rainfields::timestamp timestamp     = rainfields::timestamp::min();
     dual_prf_ratio      unfolding       = dual_prf_ratio::unknown;
-    double              vbeamwidth      = std::numeric_limits<double>::quiet_NaN();
+    double              vbeamwidth      = nan<double>();
     std::string         vers;
     std::string         video;
-    double              videogain       = std::numeric_limits<double>::quiet_NaN();
-    double              videooffset     = std::numeric_limits<double>::quiet_NaN();
+    double              videogain       = nan<double>();
+    double              videooffset     = nan<double>();
     std::string         videounits;
     video_format        vidres          = video_format::unknown;
     long                volumeid        = -1;
     std::string         volumelabel;
-    long                first_ray       = -1;
+    long                wmo_number      = -1;
 
-    size_t              data_rows       = 0;
-    size_t              data_cols       = 0;
-    std::vector<int>    data;
+    long                first_ray       = -1;
+    array2<int>         data;
 
     scan() = default;
     scan(std::istream& in);
@@ -193,8 +200,8 @@ namespace rapic
    *        message_type type;
    *        while (con.dequeue(type)) {
    *          // decode and handle interesting messages
-   *          if (type == message_type::stroke) {
-   *            stroke msg;
+   *          if (type == message_type::scan) {
+   *            scan msg;
    *            con.decode(msg);
    *            ...
    *          }
@@ -326,4 +333,6 @@ namespace rapic
     message_type      cur_type_;          // type of currently dequeued message (awaiting decode)
     size_t            cur_size_;          // size of currently dequeued message
   };
-}
+
+  void write_odim_h5_volume(std::string const& path, std::list<scan> const& scan_set);
+}}

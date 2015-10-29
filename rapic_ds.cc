@@ -8,6 +8,10 @@
  *----------------------------------------------------------------------------*/
 #include "rapic_ds.h"
 
+#include <rainutil/array_utils.h>
+#include <rainutil/trace.h>
+#include <rainutil/string_utils.h>
+
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -16,17 +20,14 @@
 #include <poll.h>
 #include <cerrno>
 #include <cmath>
-#include <cstring>
 #include <ctime>
 #include <stdexcept>
 #include <sstream>
 #include <system_error>
 #include <tuple>
 
-// TEMP
-#include <iostream>
-
-using namespace rapic;
+using namespace rainfields;
+using namespace rainfields::rapic;
 
 static constexpr message_type no_message = static_cast<message_type>(-1);
 
@@ -105,21 +106,7 @@ static void getline(std::istream& fin, std::string& buf)
   }
 }
 
-static auto tokenize(std::string const& str) -> std::vector<double>
-{
-  std::vector<double> ret;
-  size_t pos = 0;
-  while ((pos = str.find_first_not_of(" ", pos)) != std::string::npos)
-  {
-    size_t end = str.find_first_of(" ", pos + 1);
-    size_t len = (end == std::string::npos ? str.size() : end) - pos;
-    ret.push_back(std::strtod(str.c_str() + pos, nullptr));
-    pos += len;
-  }
-  return std::move(ret);
-}
-
-auto rapic::release_tag() -> char const*
+auto rainfields::rapic::release_tag() -> char const*
 {
   return RAPIC_DS_RELEASE_TAG;
 }
@@ -172,9 +159,8 @@ scan::scan(std::istream& in)
         if (cols < 0 || remainder(endrng - startrng, rngres) > 0.001)
           throw std::runtime_error("invalid rngres given end and start ranges");
 
-        data_rows = rows;
-        data_cols = cols;
-        data.assign(data_rows * data_cols, 0);
+        data.resize(rows, cols);
+        array_utils::fill(data, 0);
       }
 
       buf2.clear();
@@ -194,15 +180,15 @@ scan::scan(std::istream& in)
         while (ang < azi_min)
           ang += 360;
         size_t ray = std::lround((ang - azi_min) / angres);
-        if (ray >= data_rows || std::abs(remainder(ang - azi_min, angres)) > 0.001)
+        if (ray >= data.rows() || std::abs(remainder(ang - azi_min, angres)) > 0.001)
           throw std::runtime_error("invalid azimuth angle in ray encoding");
-        auto out = &data[ray * data_cols];
+        auto out = data[ray];
 
         if (first_ray == -1)
           first_ray = ray;
 
         // decode the data into levels
-        // NOTE: corrupt encodings can cause buffer overruns here, in the future check bin < data_cols at each
+        // NOTE: corrupt encodings can cause buffer overruns here, in the future check bin < data.cols() at each
         //       write of a bin
         int prev = 0;
         size_t bin = 0;
@@ -213,7 +199,7 @@ scan::scan(std::istream& in)
           //  absolute pixel value
           if (cur.type == enc_type::value)
           {
-            if (bin < data_cols)
+            if (bin < data.cols())
               out[bin++] = prev = cur.val;
             else
               throw std::runtime_error{"scan data overflow (ascii abs)"};
@@ -227,7 +213,7 @@ scan::scan(std::istream& in)
               count *= 10;
               count += lookup[(unsigned char)*++i].val;
             }
-            if (bin + count > data_cols)
+            if (bin + count > data.cols())
               throw std::runtime_error{"scan data overflow (ascii rle)"};
             for (int j = 0; j < count; ++j)
               out[bin++] = prev;
@@ -237,12 +223,12 @@ scan::scan(std::istream& in)
           // is just an artefact of the encoding process
           else if (cur.type == enc_type::delta)
           {
-            if (bin < data_cols)
+            if (bin < data.cols())
               out[bin++] = prev += cur.val;
             else
               throw std::runtime_error{"scan data overflow (ascii delta)"};
 
-            if (bin < data_cols)
+            if (bin < data.cols())
               out[bin++] = prev += cur.val2;
             else if (i + 1 != buf1.end())
               throw std::runtime_error{"scan data overflow (ascii delta)"};
@@ -272,9 +258,9 @@ scan::scan(std::istream& in)
         while (ang < azi_min)
           ang += 360;
         size_t ray = std::lround((ang - azi_min) / angres);
-        if (ray >= data_rows || std::abs(remainder(ang - azi_min, angres)) > 0.001)
+        if (ray >= data.rows() || std::abs(remainder(ang - azi_min, angres)) > 0.001)
           throw std::runtime_error("invalid azimuth angle in ray encoding");
-        auto out = &data[ray * data_cols];
+        auto out = data[ray];
 
         if (first_ray == -1)
           first_ray = ray;
@@ -292,12 +278,12 @@ scan::scan(std::istream& in)
             size_t count = (unsigned char) in.get();
             if (count == 0)
               break;
-            if (bin + count > data_cols)
+            if (bin + count > data.cols())
               throw std::runtime_error{"scan data overflow (binary rle)"};
             for (size_t i = 0; i < count; ++i)
               out[bin++] = val;
           }
-          else if (bin < data_cols)
+          else if (bin < data.cols())
             out[bin++] = val;
           else
             throw std::runtime_error{"scan data overflow (binary abs)"};
@@ -326,11 +312,10 @@ scan::scan(std::istream& in)
       if (pos1 == std::string::npos)
       {
 #if 1
-        std::cerr << "Invalid header detected.  station " << stnid 
+        trace::error() << "Invalid header detected.  station " << stnid 
           << " product " << (int) product
           << " tilt " << tilt
-          << " pass " << pass
-          << std::endl;
+          << " pass " << pass;
     //      << " rays_so_far " << rays_so_far
     //      << " data " << buf1 << std::endl;
 #endif
@@ -350,47 +335,47 @@ scan::scan(std::istream& in)
 
 void scan::parse_header(std::string const& key, std::string const& value)
 {
-#if 0
   trace::debug() << "header: " << key << " value: " << value;
-#endif
   if (key == "ANGLERATE")
-    anglerate = std::stod(value);
+    anglerate = from_string<double>(value);
   else if (key == "ANGRES")
-    angres = std::stod(value);
+    angres = from_string<double>(value);
   else if (key == "ANTDIAM")
-    antdiam = std::stod(value);
+    antdiam = from_string<double>(value);
   else if (key == "AZCORR")
-    azcorr = std::stod(value);
+    azcorr = from_string<double>(value);
   else if (key == "AZIM")
-    azim = std::stod(value);
+    azim = from_string<double>(value);
+  else if (key == "BEAMWIDTH")
+    hbeamwidth = vbeamwidth = from_string<double>(value);
   else if (key == "COMPPPIID")
-    compppiid = std::stoi(value);
+    compppiid = from_string<long>(value, 10);
   else if (key == "COPYRIGHT")
     copyright = value;
   else if (key == "COUNTRY")
-    country = std::stoi(value);
+    country = from_string<long>(value, 10);
   else if (key == "DATE")
-    date = std::stoi(value);
+    date = from_string<long>(value, 10);
   else if (key == "DBM2DBZ")
-    dbm2dbz = std::stod(value);
+    dbm2dbz = from_string<double>(value);
   else if (key == "DBMLVL")
-    dbmlvl = tokenize(value);
+    dbmlvl = tokenize<double>(value, " ");
   else if (key == "DBZLVL")
-    dbzlvl = tokenize(value);
+    dbzlvl = tokenize<double>(value, " ");
   else if (key == "ELCORR")
-    elcorr = std::stod(value);
+    elcorr = from_string<double>(value);
   else if (key == "ELEV")
-    elev = std::stod(value);
+    elev = from_string<double>(value);
   else if (key == "ENDRNG")
-    endrng = std::stod(value);
-  else if (key == "FREQUENCY")
-    frequency = std::stod(value);
+    endrng = from_string<double>(value);
+  else if (key == "FREQUENCY" || key == "TXFREQUENCY")
+    frequency = from_string<double>(value);
   else if (key == "FAULT")
     fault = value;
   else if (key == "HBEAMWIDTH")
-    hbeamwidth = std::stod(value);
+    hbeamwidth = from_string<double>(value);
   else if (key == "HEIGHT")
-    height = std::stod(value);
+    height = from_string<double>(value);
   else if (key == "HIPRF")
   {
     if (value == "EVENS")
@@ -399,10 +384,8 @@ void scan::parse_header(std::string const& key, std::string const& value)
       hiprf = dual_prf_strategy::high_odds;
     else if (value == "UNKNOWN")
       hiprf = dual_prf_strategy::unknown;
-#if 0
     else
       trace::error() << "unknown HIPRF value (" << value << ") ignored";
-#endif
   }
   else if (key == "IMGFMT")
   {
@@ -412,30 +395,28 @@ void scan::parse_header(std::string const& key, std::string const& value)
       imgfmt = image_format::compppi;
     else if (value == "PPI")
       imgfmt = image_format::ppi;
-#if 0
     else
       trace::error() << "unknown IMGFMT value (" << value << ") ignored";
-#endif
   }
   else if (key == "LATITUDE")
-    latitude = std::stod(value);
+    latitude = from_string<double>(value);
   else if (key == "LONGITUDE")
-    longitude = std::stod(value);
+    longitude = from_string<double>(value);
   else if (key == "NAME")
     name = value;
   else if (key == "NYQUIST")
-    nyquist = std::stod(value);
+    nyquist = from_string<double>(value);
   else if (key == "PASS")
   {
     if (sscanf(value.c_str(), "%ld of %ld", &pass, &pass_count) != 2)
       throw std::runtime_error{"invalid PASS header"};
   }
   else if (key == "PEAKPOWER")
-    peakpower = std::stod(value);
+    peakpower = from_string<double>(value);
   else if (key == "PEAKPOWERH")
-    peakpowerh = std::stod(value);
+    peakpowerh = from_string<double>(value);
   else if (key == "PEAKPOWERV")
-    peakpowerv = std::stod(value);
+    peakpowerv = from_string<double>(value);
   else if (key == "POLARISATION")
   {
     if (value == "H")
@@ -444,13 +425,11 @@ void scan::parse_header(std::string const& key, std::string const& value)
       polarisation = polarisation_type::vertical;
     else if (value == "ALT_HV")
       polarisation = polarisation_type::alternating;
-#if 0
     else
       trace::error() << "unknown POLARISATION value (" << value << ") ignored";
-#endif
   }
   else if (key == "PRF")
-    prf = std::stod(value);
+    prf = from_string<double>(value);
   else if (key == "PRODUCT")
   {
     char pt[16], label[64];
@@ -490,31 +469,29 @@ void scan::parse_header(std::string const& key, std::string const& value)
       if (ret == 5)
         angleincreasing = increasing != 0;
     }
-#if 0
     else
       trace::error() << "unknown PRODUCT value (" << value << ") ignored";
-#endif
   }
   else if (key == "PULSELENGTH")
-    pulselength = std::stod(value);
+    pulselength = from_string<double>(value);
   else if (key == "RADARTYPE")
     radartype = value;
   else if (key == "RNGRES")
-    rngres = std::stod(value);
+    rngres = from_string<double>(value);
   else if (key == "RXGAIN_H")
-    rxgain_h = std::stod(value);
+    rxgain_h = from_string<double>(value);
   else if (key == "RXGAIN_V")
-    rxgain_v = std::stod(value);
+    rxgain_v = from_string<double>(value);
   else if (key == "RXNOISE_H")
-    rxnoise_h = std::stod(value);
+    rxnoise_h = from_string<double>(value);
   else if (key == "RXNOISE_V")
-    rxnoise_v = std::stod(value);
+    rxnoise_v = from_string<double>(value);
   else if (key == "STARTRNG")
-    startrng = std::stod(value);
+    startrng = from_string<double>(value);
   else if (key == "STN_NUM")
-    stn_num = std::stoi(value);
+    stn_num = from_string<long>(value, 10);
   else if (key == "STNID")
-    stnid = std::stoi(value);
+    stnid = from_string<long>(value, 10);
   else if (key == "TILT")
   {
     if (sscanf(value.c_str(), "%ld of %ld", &tilt, &tilt_count) != 2)
@@ -527,21 +504,10 @@ void scan::parse_header(std::string const& key, std::string const& value)
   }
   else if (key == "TIMESTAMP")
   {
-    struct tm tmm;
-    if (sscanf(
-              value.c_str()
-            , "%04d%02d%02d%02d%02d%02d"
-            , &tmm.tm_year
-            , &tmm.tm_mon
-            , &tmm.tm_mon
-            , &tmm.tm_hour
-            , &tmm.tm_min
-            , &tmm.tm_sec
-            ) != 6)
+    int y,m,d,h,mi,s;
+    if (sscanf(value.c_str(), "%04d%02d%02d%02d%02d%02d", &y, &m, &d, &h, &mi, &s) != 6)
       throw std::runtime_error{"invalid TIMESTAMP header"};
-    tmm.tm_year -= 1900;
-    tmm.tm_mon -= 1;
-    timestamp = timegm(&tmm);
+    timestamp = rainfields::timestamp{y, m, d, h, mi, s};
   }
   else if (key == "UNFOLDING")
   {
@@ -553,13 +519,11 @@ void scan::parse_header(std::string const& key, std::string const& value)
       unfolding = dual_prf_ratio::_3_4;
     else if (value == "4:5")
       unfolding = dual_prf_ratio::_4_5;
-#if 0
     else
       trace::error() << "unknown UNFOLDING value (" << value << ") ignored";
-#endif
   }
   else if (key == "VBEAMWIDTH")
-    vbeamwidth = std::stod(value);
+    vbeamwidth = from_string<double>(value);
   else if (key == "VERS")
     vers = value;
   else if (key == "VIDEO")
@@ -569,20 +533,20 @@ void scan::parse_header(std::string const& key, std::string const& value)
     if (value == "THRESH")
       videogain = -999.0;
     else
-      videogain = std::stod(value);
+      videogain = from_string<double>(value);
   }
   else if (key == "VIDEOOFFSET")
   {
     if (value == "THRESH")
       videooffset = -999.0;
     else
-      videooffset = std::stod(value);
+      videooffset = from_string<double>(value);
   }
   else if (key == "VIDEOUNITS")
     videounits = value;
   else if (key == "VIDRES")
   {
-    auto vr = std::stol(value);
+    auto vr = from_string<long>(value, 10);
     if (   vr != 6
         && vr != 16
         && vr != 32
@@ -591,9 +555,7 @@ void scan::parse_header(std::string const& key, std::string const& value)
         && vr != 160
         && vr != 256)
     {
-#if 0
       trace::error() << "unknown VIDRES value (" << value << ") ignored";
-#endif
     }
     if (vr == 6)
       throw std::runtime_error("six level ASCII encoding not supported");
@@ -601,14 +563,11 @@ void scan::parse_header(std::string const& key, std::string const& value)
     vidres = static_cast<video_format>(vr);
   }
   else if (key == "VOLUMEID")
-    volumeid = std::stoi(value);
-#if 0
+    volumeid = from_string<long>(value, 10);
+  else if (key == "WMONUMBER")
+    wmo_number = from_string<long>(value, 10);
   else
     trace::warning() << "unknown header encountered: " << key << " = " << value;
-#else
-  else
-    std::cerr << "unknown header encountered: " << key << " = " << value << std::endl;
-#endif
 }
 
 client::client(size_t buffer_size, time_t keepalive_period)
@@ -1128,3 +1087,236 @@ next_i:
   // we return 0 to indicate failure - it's easy but
   return false;
 }
+
+#include <rainhdf/rainhdf.h>
+
+void rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<scan> const& scan_set)
+{
+  auto cur = scan_set.begin();
+
+  hdf::polar_volume vol{path, hdf::file::io_mode::create};
+  
+  vol.set_date_time(cur->timestamp.as_time_t());
+  {
+    int ctyn;
+    char const* ctys;
+    if (cur->country == 36)
+    {
+      ctyn = 500;
+      ctys = "AU";
+    }
+    else
+    {
+      trace::error() << "unknown country code, using 000 and XX as placeholders";
+      ctyn = 0;
+      ctys = "XX";
+    }
+
+    int stnid = cur->stnid;
+    if (cur->stnid == -1)
+    {
+      trace::error() << "missing station id, using 00 as placeholder";
+      stnid = 0;
+    }
+
+    char const* plc = cur->name.c_str();
+    if (cur->name.empty())
+    {
+      trace::error() << "missing station name, using XXX as placeholder";
+      plc = "XXX";
+    }
+
+    char buf[64];
+    if (cur->stn_num == -1)
+      snprintf(buf, 64, "RAD:%s%02d,PLC:%s,CTY:%03d", ctys, stnid, plc, ctyn);
+    else
+      snprintf(buf, 64, "RAD:%s%02d,PLC:%s,CTY:%03d,STN:%ld", ctys, stnid, plc, ctyn, cur->stn_num);
+    
+    vol.set_source(buf);
+  }
+  vol.set_latitude(cur->latitude);
+  vol.set_longitude(cur->longitude);
+  vol.set_height(cur->height);
+
+  if (!is_nan(cur->antdiam))
+    vol.attributes()["antenna_diameter"].set(cur->antdiam);
+  if (!is_nan(cur->azcorr))
+    vol.attributes()["azcorr"].set(cur->azcorr);
+  // 'azim' for rhi only
+  // 'compppiid' for compppis only
+  if (!cur->copyright.empty())
+    vol.attributes()["copyright"].set(cur->copyright);
+  if (!is_nan(cur->elcorr))
+    vol.attributes()["elcorr"].set(cur->elcorr);
+  // calculate wavelength in m/s from frequency
+  if (!is_nan(cur->frequency))
+    vol.attributes()["wavelength"].set((299792458.0 / (cur->frequency * 1000000.0)) * 100.0);
+  if (!is_nan(cur->hbeamwidth))
+    vol.attributes()["beamwH"].set(cur->hbeamwidth);
+  if (!cur->radartype.empty())
+    vol.attributes()["system"].set(cur->radartype);
+  if (!is_nan(cur->vbeamwidth))
+    vol.attributes()["beamwV"].set(cur->vbeamwidth);
+  if (!cur->vers.empty())
+    vol.attributes()["sw_version"].set(cur->vers);
+  if (cur->volumeid != -1)
+    vol.attributes()["volume_id"].set(cur->volumeid);
+  if (!cur->volumelabel.empty())
+    vol.attributes()["volume_label"].set(cur->volumelabel);
+
+  // write each tilt
+  while (cur != scan_set.end())
+  {
+    auto scan = vol.scan_append();
+    scan.set_elevation_angle(cur->elev);
+    scan.set_bin_count(cur->data.cols());
+    scan.set_range_start(cur->startrng / 1000.0);
+    scan.set_range_scale(cur->rngres);
+    scan.set_ray_count(cur->data.rows());
+    scan.set_first_ray_radiated(cur->first_ray);
+    scan.set_start_date_time(cur->timestamp.as_time_t());
+    scan.set_end_date_time(/*TODO*/0);
+
+    // write each moment
+    for (auto tilt = cur->tilt; cur != scan_set.end() && cur->tilt == tilt; ++cur)
+    {
+      // these min/max values are copied from the rapic encoder (ConcEncodeClient.cpp)
+      // the gains and offsets here are taken directly from 3d rapic's code
+      double min = 0.0, max = static_cast<int>(cur->vidres);
+      char const* quantity = nullptr;
+      std::vector<double> const* table = nullptr;
+      if (cur->video == "Refl")
+      {
+        quantity = cur->polarisation == polarisation_type::vertical ? "DBZV" : "DBZH";
+        table = cur->dbzlvl.empty() ? nullptr : &cur->dbzlvl;
+        min = -31.5;
+        max = 96.0;
+      }
+      else if (cur->video == "UnCorRefl")
+      {
+        quantity = cur->polarisation == polarisation_type::vertical ? "TV" : "TH";
+        table = cur->dbzlvl.empty() ? nullptr : &cur->dbzlvl;
+        min = -31.5;
+        max = 96.0;
+      }
+      else if (cur->video == "RawUnCorRefl")
+      {
+        quantity = cur->polarisation == polarisation_type::vertical ? "RAW_TV" : "RAW_TH";
+        table = cur->dbzlvl.empty() ? nullptr : &cur->dbzlvl;
+        min = -31.5;
+        max = 96.0;
+      }
+      else if (cur->video == "Vel")
+      {
+        quantity = cur->polarisation == polarisation_type::vertical ? "VRADV" : "VRADH";
+        min = -cur->nyquist;
+        max = cur->nyquist;
+      }
+      else if (cur->video == "SpWdth")
+      {
+        quantity = cur->polarisation == polarisation_type::vertical ? "WRADV" : "WRADH";
+        min = 0.0;
+        max = cur->nyquist;
+      }
+      else if (cur->video == "ADCdata")
+        ;
+      else if (cur->video == "PEchnl")
+        ;
+      else if (cur->video == "Interference")
+        ;
+      else if (cur->video == "RawVel")
+        ;
+      else if (cur->video == "CCOR")
+      {
+        quantity = cur->polarisation == polarisation_type::vertical ? "CCORV" : "CCORH";
+      }
+      else if (cur->video == "SQI")
+      {
+        quantity = cur->polarisation == polarisation_type::vertical ? "SQIV" : "SQIH";
+      }
+      else if (cur->video == "QCFLAGS")
+      {
+        quantity = "QCFLAGS";
+      }
+      else if (cur->video == "QC_CCOR")
+        ;
+      else if (cur->video == "QC_DESPECKLE")
+        ;
+      else if (cur->video == "QC_SQI")
+        ;
+      else if (cur->video == "QC_2TSUPPR")
+        ;
+      else if (cur->video == "QC_CCOR_2db")
+        ;
+      else if (cur->video == "ZDR")
+      {
+        quantity = "ZDR";
+        min = -9.0;
+        max = 9.0;
+      }
+      else if (cur->video == "PHIDP")
+      {
+        quantity = "PHIDP";
+        min = -90.0;
+        max = 90.0;
+      }
+      else if (cur->video == "RHOHV")
+      {
+        quantity = "RHOHV";
+        min = 0.0;
+        max = 1.15;
+      }
+      else
+      {
+        trace::error() << "unknown VIDEO type '" << cur->video << "' encoding directly with levels";
+        quantity = cur->video;
+      }
+
+      size_t dims[2] = { cur->data.rows(), cur->data.cols() };
+      // TEMP auto moment = scan.data_append(hdf::data::data_type::u8, 2, dims);
+      auto moment = scan.data_append(hdf::data::data_type::f32, 2, dims);
+
+
+      // rapic has no concept of 'undetect' so we have to set it to the same as nodata
+      // always use level 0 for nodata
+      moment.set_nodata(0.0);
+      moment.set_undetect(0.0);
+
+#if 0
+      // TEMP
+      moment.set_gain((max - min) / (static_cast<int>(cur->vidres) - 2));
+      moment.set_offset(min - ((max - min) / (static_cast<int>(cur->vidres) - 2)));
+#endif
+
+      // write the moment data
+      if (table)
+      {
+        // convert the data to the real floating point moment values
+        array1<float> rd{cur->data.size()};
+        for (size_t i = 0; i < rd.size(); ++i)
+        {
+          auto level = cur->data.data()[i];
+          if (level == 0)
+            rd[i] = nan<float>();
+          else if (level > (int) table->size())
+            throw std::runtime_error{"level exceeds table size"};
+          else
+            rd[i] = (*table)[level - 1];
+        }
+
+        // determine the minimum 
+
+        moment.set_gain(1.0);
+        moment.set_offset(1.0);
+        moment.write_pack(rd.data(), [](float v){return false;}, [](float v){return is_nan(v);});
+      }
+      else
+      {
+        moment.set_gain((max - min) / (static_cast<int>(cur->vidres) - 2));
+        moment.set_offset(min - ((max - min) / (static_cast<int>(cur->vidres) - 2)));
+        moment.write(cur->data.data());
+      }
+    }
+  }
+}
+
