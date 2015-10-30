@@ -348,6 +348,8 @@ catch (std::exception& err)
   desc << "failed to decode scan";
   if (auto p = find_header("STNID"))
     desc << " stnid: " << p->value();
+  if (auto p = find_header("NAME"))
+    desc << " name: " << p->value();
   if (auto p = find_header("PRODUCT"))
     desc << " product: " << p->value();
   if (auto p = find_header("TILT"))
