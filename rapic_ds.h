@@ -27,67 +27,6 @@ namespace rapic {
   /// Get the SCM release tag that the library was built from
   auto release_tag() -> char const*;
 
-  /// Scan types
-  enum class product_type
-  {
-      unknown
-    , ppi
-    , rhi
-    , comp_ppi      // special - can have product index
-    , image
-    , volume        // special - can have product index
-    , rhi_set
-    , merge
-    , scan_error
-  };
-
-  /// Data formats
-  /** It is important that these have the value corresponding to their name - they are used as raw integers
-   *  occasionally (look for static_cast's involving the 'scan::vidres' member. */
-  enum class video_format
-  {
-      unknown
-    , _6 = 6
-    , _16 = 16
-    , _32 = 32
-    , _64 = 64
-    , _160 = 160
-    , _256 = 256
-    //, raw_256 - specified as an enumeration in rapic and rowlf but unused by rapic
-  };
-
-  enum class dual_prf_strategy
-  {
-      unknown
-    , high_evens
-    , high_odds
-  };
-
-  enum class dual_prf_ratio
-  {
-      unknown
-    , none
-    , _2_3
-    , _3_4
-    , _4_5
-  };
-
-  enum class image_format
-  {
-      unknown
-    , rhi
-    , compppi
-    , ppi
-  };
-
-  enum class polarisation_type
-  {
-      unknown
-    , horizontal
-    , vertical
-    , alternating
-  };
-
   /// Available message types
   enum class message_type
   {
@@ -98,82 +37,141 @@ namespace rapic {
   /// MSSG status message
   struct mssg
   {
-    std::string         content;
+    std::string content;
+  };
+
+  /// Header used by a scan message
+  class header
+  {
+  public:
+    header(std::string name, std::string value)
+      : name_(std::move(name)), value_(std::move(value))
+    { }
+
+    /// Get the name of the header
+    auto name() const -> std::string const&           { return name_; }
+    /// Set the name of the header
+    auto set_name(std::string const& name) -> void    { name_ = name; }
+
+    /// Get the header value
+    auto value() const -> std::string const&          { return value_; }
+    /// Get the header value
+    auto set_value(std::string const& value) -> void  { value_ = value; }
+
+    /// Get the header value as a bool
+    auto get_boolean() const -> bool;
+    /// Get the header value as a long
+    auto get_integer() const -> long;
+    /// Get the header value as a double
+    auto get_real() const -> double;
+    /// Get the header value as a vector of longs
+    auto get_integer_array() const -> std::vector<long>;
+    /// Get the header value as a vector of doubles
+    auto get_real_array() const -> std::vector<double>;
+
+  private:
+    std::string name_;
+    std::string value_;
+  };
+
+  /// Information about a single ray
+  class ray
+  {
+  public:
+    ray()
+      : azimuth_{nan<float>()}, elevation_{nan<float>()}, time_offset_{-1}
+    { }
+
+    ray(float azimuth)
+      : azimuth_{azimuth}, elevation_{nan<float>()}, time_offset_{-1} 
+    { }
+
+    ray(float azimuth, float elevation, int time_offset)
+      : azimuth_{azimuth}, elevation_{elevation}, time_offset_{time_offset}
+    { }
+
+    /// Get the azimuth at the center of this ray (degrees)
+    auto azimuth() const -> float   { return azimuth_; }
+
+    /// Get the elevation at the center of this ray (degrees)
+    auto elevation() const -> float { return elevation_; }
+
+    /// Get the time offset from the start of scan to this ray (seconds)
+    auto time_offset() const -> int { return time_offset_; }
+
+  private:
+    float azimuth_;
+    float elevation_;
+    int   time_offset_;
   };
 
   /// Radar product message
-  struct scan
+  class scan
   {
-    double              angle1          = nan<double>();
-    double              angle2          = nan<double>();
-    bool                angleincreasing = true;
-    double              anglerate       = nan<double>();
-    double              angres          = nan<double>();
-    double              antdiam         = nan<double>();
-    double              azcorr          = nan<double>();
-    double              azim            = nan<double>();
-    long                compppiid       = -1;
-    std::string         copyright;
-    long                country         = -1;
-    long                date            = -1;
-    double              dbm2dbz         = nan<double>();
-    std::vector<double> dbmlvl;
-    std::vector<double> dbzlvl;
-    double              elcorr          = nan<double>();
-    double              elev            = nan<double>();
-    double              endrng          = nan<double>();
-    double              frequency       = nan<double>();
-    std::string         fault;
-    double              hbeamwidth      = nan<double>();
-    double              height          = nan<double>();
-    dual_prf_strategy   hiprf           = dual_prf_strategy::unknown;
-    image_format        imgfmt          = image_format::unknown;
-    double              latitude        = nan<double>();
-    double              longitude       = nan<double>();
-    std::string         name;
-    double              nyquist         = nan<double>();
-    long                pass            = -1;
-    long                pass_count      = -1;
-    double              peakpower       = nan<double>();
-    double              peakpowerh      = nan<double>();
-    double              peakpowerv      = nan<double>();
-    polarisation_type   polarisation    = polarisation_type::unknown;
-    double              prf             = nan<double>();
-    product_type        product         = product_type::unknown;
-    double              pulselength     = nan<double>();
-    std::string         radartype;
-    double              rngres          = nan<double>();
-    double              rxgain_h        = nan<double>();
-    double              rxgain_v        = nan<double>();
-    double              rxnoise_h       = nan<double>();
-    double              rxnoise_v       = nan<double>();
-    double              startrng        = nan<double>();
-    long                stn_num         = -1;
-    long                stnid           = -1;
-    long                tilt            = -1;
-    long                tilt_count      = -1;
-    std::pair<int, int> time            = {-1, -1};
-    rainfields::timestamp timestamp     = rainfields::timestamp::min();
-    dual_prf_ratio      unfolding       = dual_prf_ratio::unknown;
-    double              vbeamwidth      = nan<double>();
-    std::string         vers;
-    std::string         video;
-    double              videogain       = nan<double>();
-    double              videooffset     = nan<double>();
-    std::string         videounits;
-    video_format        vidres          = video_format::unknown;
-    long                volumeid        = -1;
-    std::string         volumelabel;
-    long                wmo_number      = -1;
+  public:
+    /// Construct an empty scan
+    scan();
 
-    long                first_ray       = -1;
-    array2<int>         data;
+    /// Reset the scan to an uninitialized state
+    auto reset() -> void;
 
-    scan() = default;
-    scan(std::istream& in);
+    /// Decode a scan from the raw wire format
+    auto decode(uint8_t const* in, size_t size) -> void;
+
+    /// Get the station identifier
+    auto station_id() const -> int                                    { return station_id_; }
+
+    /// Get the product string
+    /** This value is normally unique to each complete product which is built from multiple scan messages.  For
+     *  example, a volume product contains many passes which each share this string. */
+    auto product() const -> std::string const&;
+
+    /// Get the pass number
+    /** If the pass number is unavailable this function returns -1 */
+    auto pass() const -> int                                          { return pass_; }
+
+    /// Get the number of passes in the containing product
+    /** If the pass count is unavailable this function returns -1 */
+    auto pass_count() const -> int                                    { return pass_count_; }
+
+    /// Access all the scan headers
+    /** Note that all rapic headers are available via the returned container including those which are exposed
+     *  explicitly via other functions. */
+    auto headers() const -> std::vector<header> const&                { return headers_; }
+
+    /// Find a specific header
+    /** Returns nullptr if the header is not present. */
+    auto find_header(std::string const& name) const -> header const*  { return find_header(name.c_str()); }
+    auto find_header(char const* name) const -> header const*;
+
+    /// Access the information about each ray
+    auto rays() const -> std::vector<ray> const&                      { return rays_; }
+
+    /// Access the scan data encoded as levels
+    auto level_data() const -> array2<uint8_t> const&                 { return level_data_; }
+
+    /// Access the scan data as native moment values
+    /** If the correct conversion from level data to moment data cannot be determined this function will throw
+     *  an exception. */
+    auto scan_data() const -> array2<float>;
 
   private:
-    auto parse_header(std::string const& key, std::string const& value) -> void;
+    auto get_header_string(char const* name) const -> std::string const&;
+    auto get_header_integer(char const* name) const -> long;
+    auto get_header_real(char const* name) const -> double;
+    auto initialize_rays() -> void;
+
+  private:
+    std::vector<header> headers_;     // scan headers
+    std::vector<ray>    rays_;        // ray headers
+    array2<uint8_t>     level_data_;  // level encoded scan data
+
+    // these are cached from the headers structure due to likelyhood of frequent access
+    int   station_id_;
+    int   product_idx_;
+    int   pass_;
+    int   pass_count_;
+    bool  is_rhi_;     
   };
 
   /// Rapic Data Server client connection manager
@@ -243,12 +241,7 @@ namespace rapic {
 
     /// Add a product to filter for radar products
     /** Filters added by this function will only take effect at the next call to connect(). */
-    auto add_filter(
-          int station
-        , product_type type
-        , int scan_id = -1
-        , std::vector<std::string> const& moments = {}
-        ) -> void;
+    auto add_filter(int station, std::string const& product, std::vector<std::string> const& moments = {}) -> void;
 
     /// Connect to a server
     auto connect(std::string address, std::string service) -> void;

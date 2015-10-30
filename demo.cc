@@ -20,6 +20,7 @@
 
 using namespace rainfields;
 
+#if 1
 auto handle_rapic_messages(rapic::client& con) -> void
 {
   rapic::message_type type;
@@ -39,6 +40,7 @@ auto handle_rapic_messages(rapic::client& con) -> void
       {
         rapic::scan msg;
         con.decode(msg);
+#if 0
         std::cout << "SCAN:"
           << " stn " << msg.stnid
           << " tilt " << msg.tilt << "/" << msg.tilt_count
@@ -47,15 +49,17 @@ auto handle_rapic_messages(rapic::client& con) -> void
           << " ts " << msg.timestamp
           << " volumelabel " << msg.volumelabel
           << std::endl;
+#endif
       }
       catch (std::exception& err)
       {
-        std::cerr << "error decoding scan: " << err.what() << std::endl;
+        std::cerr << "error decoding scan: " << format_exception(err) << std::endl;
       }
       break;
     }
   }
 }
+#endif
 
 int main(int argc, char const* argv[])
 {
@@ -72,8 +76,12 @@ int main(int argc, char const* argv[])
   try
   {
 #if 0
+    // technically the traversal from char to uint8_t here is unsafe
     std::ifstream in{"tindal_bad"};
-    rapic::scan scan{in};
+    std::string buf{std::istreambuf_iterator<char>(in.rdbuf()), std::istreambuf_iterator<char>()};
+
+    rapic::scan scan;
+    scan.decode(reinterpret_cast<uint8_t const*>(buf.data()), buf.size());
 
     std::cout << "read scan okay" << std::endl;
 
@@ -81,11 +89,12 @@ int main(int argc, char const* argv[])
     // connect to GPATS
     rapic::client con;
 
-    con.add_filter(-1, rapic::product_type::volume);
-#if 0
-    con.add_filter(2, rapic::product_type::volume);
-    con.add_filter(3, rapic::product_type::volume);
-    con.add_filter(70, rapic::product_type::volume);
+#if 1
+    con.add_filter(-1, "ANY");
+#else
+    con.add_filter(2, "VOL");
+    //con.add_filter(3, "VOL");
+    //con.add_filter(70, "VOL");
 #endif
 
     con.connect("cmssdev.bom.gov.au", "15555");
@@ -107,7 +116,7 @@ int main(int argc, char const* argv[])
   }
   catch (std::exception& err)
   {
-    std::cerr << "fatal error: " << err.what() << std::endl;
+    std::cerr << "fatal error: " << format_exception(err) << std::endl;
     return EXIT_FAILURE;
   }
   catch (...)
