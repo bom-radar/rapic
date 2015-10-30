@@ -21,6 +21,7 @@
 #include <cerrno>
 #include <cmath>
 #include <ctime>
+#include <map>
 #include <stdexcept>
 #include <sstream>
 #include <system_error>
@@ -149,7 +150,8 @@ auto scan::reset() -> void
   level_data_.resize(0, 0);
 
   station_id_ = -1;
-  product_idx_ = -1;
+  volume_id_ = -1;
+  product_.clear();
   pass_ = -1;
   pass_count_ = -1;
   is_rhi_ = false;
@@ -396,9 +398,14 @@ auto scan::initialize_rays() -> void
 
   // store the header fields which we cache
   station_id_ = get_header_integer("STNID");
-  // TODO - product
-  // TODO pass
-  // TODO pass_count
+  if (auto p = find_header("VOLUMEID"))
+    volume_id_ = p->get_integer();
+  product_ = get_header_string("PRODUCT");
+  if (auto p = find_header("PASS"))
+  {
+    if (sscanf(p->value().c_str(), "%d of %d", &pass_, &pass_count_) != 2)
+      throw std::runtime_error{"invalid PASS header"};
+  }
   is_rhi_ = get_header_string("IMGFMT") == "RHI";
 
   // get the mandatory characteristics needed to determine scan structure
@@ -897,15 +904,219 @@ next_i:
   return false;
 }
 
-#if 0
 #include <rainhdf/rainhdf.h>
+
+namespace {
+struct quantity
+{
+  char const* hname;  // odim name for unknown or horizontal polarized
+  char const* vname;  // odim name for vertical polarized
+};
+static std::map<std::string, quantity> const video_map = 
+{
+    { "Refl",         { "DBZH", "DBZV" }}
+  , { "UnCorRefl",    { "TH", "TV" }}
+  , { "RawUnCorRefl", { "RAW_TH", "RAW_TV" }}
+  , { "Vel",          { "VRADH", "VRADV" }}
+  , { "SpWdth",       { "WRADH", "WRADV" }}
+  , { "QCFLAGS",      { "QCFLAGS", "QCFLAGS" }}
+  , { "ZDR",          { "ZDR", "ZDR" }}
+  , { "PHIDP",        { "PHIDP", "PHIDP" }}
+  , { "RHOHV",        { "RHOHV", "RHOHV" }}
+};
+using odim_meta_fn = void (*)(scan const&, header const&, hdf::polar_volume&, hdf::scan&, hdf::data&);
+#define METAFN [](scan const& s, header const& h, hdf::polar_volume& v, hdf::scan& t, hdf::data& d)
+static std::map<std::string, odim_meta_fn> const header_map = 
+{
+  // volume persistent metadata
+    { "STNID", METAFN { }} // ignored - special processing
+  , { "NAME", METAFN { }} // ignored - special processing
+  , { "STN_NUM", METAFN { }} // ignored - special processing
+  , { "WMONUMBER", METAFN { }} // ignored - special processing
+  , { "COUNTRY", METAFN { }} // ignored - special processing
+  , { "LATITUDE",     METAFN { v.set_latitude(h.get_real() * -1.0); }}
+  , { "LONGITUDE",    METAFN { v.set_longitude(h.get_real()); }}
+  , { "HEIGHT",       METAFN { v.set_height(h.get_real()); }}
+  , { "BEAMWIDTH",    METAFN { v.attributes()["beamwidth"].set(h.get_real()); }}
+  , { "HBEAMWIDTH",   METAFN { v.attributes()["beamwH"].set(h.get_real()); }}
+  , { "VBEAMWIDTH",   METAFN { v.attributes()["beamwV"].set(h.get_real()); }}
+  , { "FREQUENCY",    METAFN
+      { 
+        auto freq = h.get_real();
+        v.attributes()["frequency"].set(freq); // non-standard
+        v.attributes()["wavelength"].set((299792458.0 / (freq * 1000000.0)) * 100.0);
+      }
+    }
+  , { "TXFREQUENCY",    METAFN
+      { 
+        auto freq = h.get_real();
+        v.attributes()["frequency"].set(freq); // non-standard
+        v.attributes()["wavelength"].set((299792458.0 / (freq * 1000000.0)) * 100.0);
+      }
+    }
+  , { "VERS",         METAFN { v.attributes()["sw_version"].set(h.value()); }}
+  , { "COPYRIGHT",    METAFN { v.attributes()["copyright"].set(h.value()); }} // non-standard
+  , { "ANGLERATE",    METAFN { v.attributes()["rpm"].set(h.get_real() * 60.0 / 360.0); }}
+
+  // tilt persistent metadata
+  , { "TILT",         METAFN
+      {
+        long a, b;
+        sscanf(h.value().c_str(), "%ld of %ld", &a, &b);
+        t.attributes()["scan_index"].set(a);
+        t.attributes()["scan_count"].set(b);
+      }
+    }
+  , { "ELEV",         METAFN { t.set_elevation_angle(h.get_real()); }}
+  , { "RNGRES",       METAFN { t.set_range_scale(h.get_real()); }}
+  , { "STARTRNG",     METAFN { t.set_range_start(h.get_real() / 1000.0); }}
+  , { "NYQUIST",      METAFN { t.attributes()["NI"].set(h.get_real()); }}
+  , { "PRF",          METAFN { t.attributes()["highprf"].set(h.get_real()); }}
+  , { "UNFOLDING",    METAFN
+      {
+        t.attributes()["unfolding_ratio"].set(h.value()); // non-standard
+        if (h.value() != "None")
+        {
+          if (auto p = s.find_header("PRF"))
+          {
+            int a, b;
+            sscanf(h.value().c_str(), "%d:%d", &a, &b);
+            if (b < a)
+              std::swap(a, b);
+            t.attributes()["lowprf"].set(p->get_real() * a / b);
+          }
+        }
+      }
+    }
+  , { "POLARISATION", METAFN
+      {
+        if (h.value() == "H")
+          t.attributes()["polmode"].set("single-H");
+        else if (h.value() == "V")
+          t.attributes()["polmode"].set("single-V");
+        else if (h.value() == "ALT_HV")
+          t.attributes()["polmode"].set("switched-dual");
+        else
+          t.attributes()["polmode"].set(h.value());
+      }
+    }
+
+  // per moment metadata
+  , { "PASS",         METAFN { }} // ignored - implicit
+  , { "VIDEO",        METAFN
+      {
+        bool vpol = false;
+        if (auto p = s.find_header("POLARISATION"))
+          vpol = p->value() == "V";
+        auto i = video_map.find(h.value());
+        if (i == video_map.end())
+          d.set_quantity(h.value());
+        else
+          d.set_quantity(vpol ? i->second.vname : i->second.hname);
+      }
+    }
+  , { "FAULT",        METAFN { d.attributes()["malfunc"].set(true); d.attributes()["radar_msg"].set(h.value()); }}
+};
+}
 
 void rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<scan> const& scan_set)
 {
-  auto cur = scan_set.begin();
+  header const* h1; header const* h2;
 
-  hdf::polar_volume vol{path, hdf::file::io_mode::create};
+  // sanity check
+  if (scan_set.empty())
+    throw std::runtime_error{"empty scan set"};
+
+  // initialize the volume file
+  auto hvol = hdf::polar_volume{path, hdf::file::io_mode::create};
+
+  // initialize the first scan
+  scan const* prev = &scan_set.front();
+  auto hscan = hvol.scan_append();
+
+  // write the special volume level headers
+  {
+    int pos = 0;
+    char buf[128];
+
+    int ctyn = -1;
+    char const* ctys = "AU";
+    if (auto p = prev->find_header("COUNTRY"))
+    {
+      if (p->get_integer() == 36)
+      {
+        ctyn = 500;
+        ctys = "AU";
+      }
+      else
+      {
+        trace::warning() << "unknown country code, using 000 and XX as placeholders";
+        ctyn = 0;
+        ctys = "XX";
+      }
+    }
+
+    pos += snprintf(buf + pos, 128 - pos, "RAD:%s%02d", ctys, prev->station_id());
+
+    if (auto p = prev->find_header("NAME"))
+      pos += snprintf(buf + pos, 128 - pos, ",PLC:%s", p->value().c_str());
+
+    if (ctyn != -1)
+      pos += snprintf(buf + pos, 128 - pos, ",CTY:%03d", ctyn);
+
+    if (auto p = prev->find_header("WMONUMBER"))
+      pos += snprintf(buf + pos, 128 - pos, ",WMO:%s", p->value().c_str());
+
+    if (auto p = prev->find_header("STN_NUM"))
+      pos += snprintf(buf + pos, 128 - pos, ",STN:%ld", p->get_integer());
+
+    buf[127] = '\0';
+    hvol.set_source(buf);
+  }
+
+  // add each scan to the volume
+  for (auto& s : scan_set)
+  {
+    // detect the start of a new tilt
+    // use the TILT header if available, otherwise fallback to elevation angle
+    bool new_tilt = true;
+    if ((h1 = s.find_header("TILT")) && (h2 = prev->find_header("TILT")))
+      new_tilt = h1->value() != h2->value();
+    else if ((h1 = s.find_header("ELEV")) && (h2 = prev->find_header("ELEV")))
+      new_tilt = std::fabs(h1->get_real() - h2->get_real()) >= 0.001;
+    if (new_tilt)
+      hscan = hvol.scan_append();
+
+    // write the special tilt metadata
+    hscan.set_bin_count(s.level_data().cols());
+    hscan.set_ray_count(s.level_data().rows());
+    hscan.set_ray_start(-0.5);
+    // TODO hscan.set_first_ray_radiated(_INDEX_ of first ray radiated);
+
+    // determine the appropriate data type and size
+    size_t dims[2] = { s.level_data().rows(), s.level_data().cols() };
+    auto hdata = hscan.data_append(hdf::data::data_type::u8, 2, dims);
+
+    // process each header
+    for (auto& h : s.headers())
+    {
+      auto i = header_map.find(h.name());
+      if (i == header_map.end())
+      {
+        trace::warning() << "unknown rapic header encountered: " << h.name();
+        hdata.attributes()["rapic_" + h.name()].set(h.value());
+      }
+      else
+        i->second(s, h, hvol, hscan, hdata);
+    }
+
+    // write the moment data
+    
+    prev = &s;
+  }
+}
   
+#if 0
   vol.set_date_time(cur->timestamp.as_time_t());
   {
     int ctyn;
@@ -1129,8 +1340,8 @@ void rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
     }
   }
 }
-
 #endif
+
 #if 0
 scan::scan(std::istream& in)
 {
@@ -1357,8 +1568,8 @@ scan::scan(std::istream& in)
 void scan::parse_header(std::string const& key, std::string const& value)
 {
   trace::debug() << "header: " << key << " value: " << value;
-  if (key == "ANGLERATE")
-    anglerate = from_string<double>(value);
+//  if (key == "ANGLERATE")
+//    anglerate = from_string<double>(value);
   else if (key == "ANGRES")
     angres = from_string<double>(value);
   else if (key == "ANTDIAM")
@@ -1367,14 +1578,14 @@ void scan::parse_header(std::string const& key, std::string const& value)
     azcorr = from_string<double>(value);
   else if (key == "AZIM")
     azim = from_string<double>(value);
-  else if (key == "BEAMWIDTH")
-    hbeamwidth = vbeamwidth = from_string<double>(value);
+//  else if (key == "BEAMWIDTH")
+//    hbeamwidth = vbeamwidth = from_string<double>(value);
   else if (key == "COMPPPIID")
     compppiid = from_string<long>(value, 10);
-  else if (key == "COPYRIGHT")
-    copyright = value;
-  else if (key == "COUNTRY")
-    country = from_string<long>(value, 10);
+//  else if (key == "COPYRIGHT")
+//    copyright = value;
+//  else if (key == "COUNTRY")
+//    country = from_string<long>(value, 10);
   else if (key == "DATE")
     date = from_string<long>(value, 10);
   else if (key == "DBM2DBZ")
@@ -1385,18 +1596,18 @@ void scan::parse_header(std::string const& key, std::string const& value)
     dbzlvl = tokenize<double>(value, " ");
   else if (key == "ELCORR")
     elcorr = from_string<double>(value);
-  else if (key == "ELEV")
-    elev = from_string<double>(value);
+//  else if (key == "ELEV")
+//    elev = from_string<double>(value);
   else if (key == "ENDRNG")
     endrng = from_string<double>(value);
-  else if (key == "FREQUENCY" || key == "TXFREQUENCY")
-    frequency = from_string<double>(value);
-  else if (key == "FAULT")
-    fault = value;
-  else if (key == "HBEAMWIDTH")
-    hbeamwidth = from_string<double>(value);
-  else if (key == "HEIGHT")
-    height = from_string<double>(value);
+//  else if (key == "FREQUENCY" || key == "TXFREQUENCY")
+//    frequency = from_string<double>(value);
+//  else if (key == "FAULT")
+//    fault = value;
+//  else if (key == "HBEAMWIDTH")
+//    hbeamwidth = from_string<double>(value);
+//  else if (key == "HEIGHT")
+//    height = from_string<double>(value);
   else if (key == "HIPRF")
   {
     if (value == "EVENS")
@@ -1419,38 +1630,38 @@ void scan::parse_header(std::string const& key, std::string const& value)
     else
       trace::error() << "unknown IMGFMT value (" << value << ") ignored";
   }
-  else if (key == "LATITUDE")
-    latitude = from_string<double>(value);
-  else if (key == "LONGITUDE")
-    longitude = from_string<double>(value);
-  else if (key == "NAME")
-    name = value;
-  else if (key == "NYQUIST")
-    nyquist = from_string<double>(value);
-  else if (key == "PASS")
-  {
-    if (sscanf(value.c_str(), "%ld of %ld", &pass, &pass_count) != 2)
-      throw std::runtime_error{"invalid PASS header"};
-  }
+//  else if (key == "LATITUDE")
+//    latitude = from_string<double>(value);
+//  else if (key == "LONGITUDE")
+//    longitude = from_string<double>(value);
+//  else if (key == "NAME")
+//    name = value;
+//  else if (key == "NYQUIST")
+//    nyquist = from_string<double>(value);
+//  else if (key == "PASS")
+//  {
+//    if (sscanf(value.c_str(), "%ld of %ld", &pass, &pass_count) != 2)
+//      throw std::runtime_error{"invalid PASS header"};
+//  }
   else if (key == "PEAKPOWER")
     peakpower = from_string<double>(value);
   else if (key == "PEAKPOWERH")
     peakpowerh = from_string<double>(value);
   else if (key == "PEAKPOWERV")
     peakpowerv = from_string<double>(value);
-  else if (key == "POLARISATION")
-  {
-    if (value == "H")
-      polarisation = polarisation_type::horizontal;
-    else if (value == "V")
-      polarisation = polarisation_type::vertical;
-    else if (value == "ALT_HV")
-      polarisation = polarisation_type::alternating;
-    else
-      trace::error() << "unknown POLARISATION value (" << value << ") ignored";
-  }
-  else if (key == "PRF")
-    prf = from_string<double>(value);
+//  else if (key == "POLARISATION")
+//  {
+//    if (value == "H")
+//      polarisation = polarisation_type::horizontal;
+//    else if (value == "V")
+//      polarisation = polarisation_type::vertical;
+//    else if (value == "ALT_HV")
+//      polarisation = polarisation_type::alternating;
+//    else
+//      trace::error() << "unknown POLARISATION value (" << value << ") ignored";
+//  }
+//  else if (key == "PRF")
+//    prf = from_string<double>(value);
   else if (key == "PRODUCT")
   {
     char pt[16], label[64];
@@ -1497,8 +1708,8 @@ void scan::parse_header(std::string const& key, std::string const& value)
     pulselength = from_string<double>(value);
   else if (key == "RADARTYPE")
     radartype = value;
-  else if (key == "RNGRES")
-    rngres = from_string<double>(value);
+//  else if (key == "RNGRES")
+//    rngres = from_string<double>(value);
   else if (key == "RXGAIN_H")
     rxgain_h = from_string<double>(value);
   else if (key == "RXGAIN_V")
@@ -1507,17 +1718,17 @@ void scan::parse_header(std::string const& key, std::string const& value)
     rxnoise_h = from_string<double>(value);
   else if (key == "RXNOISE_V")
     rxnoise_v = from_string<double>(value);
-  else if (key == "STARTRNG")
-    startrng = from_string<double>(value);
-  else if (key == "STN_NUM")
-    stn_num = from_string<long>(value, 10);
-  else if (key == "STNID")
-    stnid = from_string<long>(value, 10);
-  else if (key == "TILT")
-  {
-    if (sscanf(value.c_str(), "%ld of %ld", &tilt, &tilt_count) != 2)
-      throw std::runtime_error{"invalid TILT header"};
-  }
+//  else if (key == "STARTRNG")
+//    startrng = from_string<double>(value);
+//  else if (key == "STN_NUM")
+//    stn_num = from_string<long>(value, 10);
+//  else if (key == "STNID")
+//    stnid = from_string<long>(value, 10);
+//  else if (key == "TILT")
+//  {
+//    if (sscanf(value.c_str(), "%ld of %ld", &tilt, &tilt_count) != 2)
+//      throw std::runtime_error{"invalid TILT header"};
+//  }
   else if (key == "TIME")
   {
     if (sscanf(value.c_str(), "%d.%d", &time.first, &time.second) != 2)
@@ -1530,23 +1741,23 @@ void scan::parse_header(std::string const& key, std::string const& value)
       throw std::runtime_error{"invalid TIMESTAMP header"};
     timestamp = rainfields::timestamp{y, m, d, h, mi, s};
   }
-  else if (key == "UNFOLDING")
-  {
-    if (value == "None")
-      unfolding = dual_prf_ratio::none;
-    else if (value == "2:3")
-      unfolding = dual_prf_ratio::_2_3;
-    else if (value == "3:4")
-      unfolding = dual_prf_ratio::_3_4;
-    else if (value == "4:5")
-      unfolding = dual_prf_ratio::_4_5;
-    else
-      trace::error() << "unknown UNFOLDING value (" << value << ") ignored";
-  }
-  else if (key == "VBEAMWIDTH")
-    vbeamwidth = from_string<double>(value);
-  else if (key == "VERS")
-    vers = value;
+//  else if (key == "UNFOLDING")
+//  {
+//    if (value == "None")
+//      unfolding = dual_prf_ratio::none;
+//    else if (value == "2:3")
+//      unfolding = dual_prf_ratio::_2_3;
+//    else if (value == "3:4")
+//      unfolding = dual_prf_ratio::_3_4;
+//    else if (value == "4:5")
+//      unfolding = dual_prf_ratio::_4_5;
+//    else
+//      trace::error() << "unknown UNFOLDING value (" << value << ") ignored";
+//  }
+//  else if (key == "VBEAMWIDTH")
+//    vbeamwidth = from_string<double>(value);
+//  else if (key == "VERS")
+//    vers = value;
   else if (key == "VIDEO")
     video = value;
   else if (key == "VIDEOGAIN")
@@ -1585,8 +1796,8 @@ void scan::parse_header(std::string const& key, std::string const& value)
   }
   else if (key == "VOLUMEID")
     volumeid = from_string<long>(value, 10);
-  else if (key == "WMONUMBER")
-    wmo_number = from_string<long>(value, 10);
+//  else if (key == "WMONUMBER")
+//    wmo_number = from_string<long>(value, 10);
   else
     trace::warning() << "unknown header encountered: " << key << " = " << value;
 }

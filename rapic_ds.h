@@ -121,10 +121,14 @@ namespace rapic {
     /// Get the station identifier
     auto station_id() const -> int                                    { return station_id_; }
 
+    /// Get the volume identifier
+    /** If there is no volume identifier this function returns -1 */
+    auto volume_id() const -> int                                     { return volume_id_; }
+
     /// Get the product string
     /** This value is normally unique to each complete product which is built from multiple scan messages.  For
      *  example, a volume product contains many passes which each share this string. */
-    auto product() const -> std::string const&;
+    auto product() const -> std::string const&                        { return product_; }
 
     /// Get the pass number
     /** If the pass number is unavailable this function returns -1 */
@@ -167,11 +171,12 @@ namespace rapic {
     array2<uint8_t>     level_data_;  // level encoded scan data
 
     // these are cached from the headers structure due to likelyhood of frequent access
-    int   station_id_;
-    int   product_idx_;
-    int   pass_;
-    int   pass_count_;
-    bool  is_rhi_;     
+    int         station_id_;
+    int         volume_id_;
+    std::string product_;
+    int         pass_;
+    int         pass_count_;
+    bool        is_rhi_;     
   };
 
   /// Rapic Data Server client connection manager
@@ -327,5 +332,15 @@ namespace rapic {
     size_t            cur_size_;          // size of currently dequeued message
   };
 
+  /// Write a list of rapic scans as an ODIM_H5 polar volume file
+  /**
+   * This function assumes the following preconditions about the scan_set:
+   * - All scans are of the VOLUMETRIC product type
+   * - All scans belong to the same product instance
+   * - The list is sorted by pass order such that all passess associated with a tilt are grouped together
+   *
+   * The tilts and passess will be written out in the order of the list.  That is, the first scan will be
+   * written to the ODIM group dataset1/data1.
+   */
   void write_odim_h5_volume(std::string const& path, std::list<scan> const& scan_set);
 }}
