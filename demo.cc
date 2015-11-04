@@ -40,6 +40,7 @@ auto handle_rapic_messages(rapic::client& con) -> void
       {
         rapic::scan msg;
         con.decode(msg);
+        std::cout << "SCAN: " << msg.product() << std::endl;
 #if 0
         std::cout << "SCAN:"
           << " stn " << msg.stnid

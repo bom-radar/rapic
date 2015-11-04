@@ -138,6 +138,20 @@ namespace rapic {
     /** If the pass count is unavailable this function returns -1 */
     auto pass_count() const -> int                                    { return pass_count_; }
 
+    /// Get the minimum angle for the scan
+    /** This value is normally 0 (for a complete sweep), ANGLE1 from the product header (for ascending RHIs or
+     *  CW sector sweeps) or ANGLE2 from the product header (for descending RHIs or CCW sector sweeps). */
+    auto angle_min() const -> float                                   { return angle_min_; }
+
+    /// Get the maximum angle for the scan
+    /** This value is normally 360 (for a complete sweep), ANGLE2 from the product header (for ascending RHIs or
+     *  CW sector sweeps) or ANGLE1 from the product header (for descending RHIs or CCW sector sweeps). */
+    auto angle_max() const -> float                                   { return angle_max_; }
+
+    /// Get the anglular resolution for the scan
+    /** This value represents the angular sweep width of a single ray. */
+    auto angle_resolution() const -> float                            { return angle_resolution_; }
+
     /// Access all the scan headers
     /** Note that all rapic headers are available via the returned container including those which are exposed
      *  explicitly via other functions. */
@@ -176,7 +190,10 @@ namespace rapic {
     std::string product_;
     int         pass_;
     int         pass_count_;
-    bool        is_rhi_;     
+    bool        is_rhi_;
+    float       angle_min_;
+    float       angle_max_;
+    float       angle_resolution_;
   };
 
   /// Rapic Data Server client connection manager
