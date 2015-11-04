@@ -1064,8 +1064,8 @@ static std::map<std::string, odim_meta_fn> const header_map =
   , { "STCRANGE",     METAFN { m.t.attributes()["rapic_STCRANGE"].set(h.get_real()); }}
 
   // per moment metadata
-  , { "VIDEOGAIN",    METAFN { m.vidgain = h.value(); }} // special processing
-  , { "VIDEOOFFSET",  METAFN { m.vidoffset = h.value(); }} // special processing
+  , { "VIDEOGAIN",    METAFN { m.vidgain = h.value(); m.d.attributes()["rapic_VIDEOGAIN"].set(m.vidgain); }} // special processing
+  , { "VIDEOOFFSET",  METAFN { m.vidoffset = h.value(); m.d.attributes()["rapic_VIDEOOFFSET"].set(m.vidoffset); }} // special processing
   , { "VIDEO",        METAFN { m.video = h.value(); }} // special processing
   , { "FAULT",        METAFN { m.d.attributes()["malfunc"].set(true); m.d.attributes()["radar_msg"].set(h.value()); }}
   , { "CLEARAIR",     METAFN { m.d.attributes()["rapic_CLEARAIR"].set(h.value() == "ON"); }}
@@ -1309,6 +1309,10 @@ void rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
 
       // determine the matching output level for each threshold and
       // check that each threshold level can be exactly represented by the 8-bit encoding
+      /* note that we currently output the threshold values themselves as the ODIM value.  ODIM doesn't have a
+       * concept of thresholded moments so it may be better to convert these to bin centers like we do for the
+       * gain/offset style moments.  this isn't necessarily easy though due to the top bin (what width to use)
+       * and the non-linear nature of dBZs... */
       level_convert.resize(m.thresholds.size() + 1);
       level_convert[0] = 0;
       for (size_t i = 0; i < m.thresholds.size(); ++i)
@@ -1324,7 +1328,7 @@ void rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
         }
       }
 
-      // unpack to real floating point values
+      // convert between the rapic and odim levels
       for (size_t i = 0; i < ibuf.size(); ++i)
       {
         auto lvl = ibuf.data()[i];
@@ -1342,9 +1346,12 @@ void rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
     else if (   !m.vidgain.empty() && m.vidgain != "THRESH"
              && !m.vidoffset.empty() && m.vidoffset != "THRESH")
     {
-      // gain and offset specified directly by rapic - copy straight to ODIM
-      hdata.set_gain(from_string<double>(m.vidgain));
-      hdata.set_offset(from_string<double>(m.vidoffset));
+      // gain and offset specified directly by rapic - copy data straight to ODIM
+      // we add half of the gain to the rapic offset to convert from the threshold bin lower edge into the bin
+      // center value which is the best estimate for the real value we can get
+      auto gain = from_string<double>(m.vidgain);
+      hdata.set_gain(gain);
+      hdata.set_offset(from_string<double>(m.vidoffset) + 0.5 * gain);
       hdata.write(ibuf.data());
     }
     // velocity moment with nyquist or VELLVL supplied?
@@ -1355,8 +1362,11 @@ void rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
 
       // this logic is copied from ConcEncodeClient.cpp (via Ray)
       auto gain = (2 * m.maxvel) / (m.vidres - 1);
+      auto offset = -m.maxvel - gain;
+
+      // as above, we add half the gain to the rapic offset to get bin centers instead of minimums
       hdata.set_gain(gain);
-      hdata.set_offset(-m.maxvel - gain);
+      hdata.set_offset(offset + 0.5 * gain);
       hdata.write(ibuf.data());
     }
     // otherwise we don't know what to do - just encode the levels directly
