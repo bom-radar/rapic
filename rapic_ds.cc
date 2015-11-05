@@ -1071,7 +1071,7 @@ static std::map<std::string, odim_meta_fn> const header_map =
   , { "CLEARAIR",     METAFN { m.d.attributes()["rapic_CLEARAIR"].set(h.value() == "ON"); }}
   , { "PASS",         METAFN { }} // ignored - implicit
   , { "VIDEOUNITS",   METAFN { m.d.attributes()["rapic_VIDEOUNITS"].set(h.value()); }} // mostly redundant, keep in case of unknown VIDEO
-  , { "VIDRES",       METAFN { m.vidres = h.get_integer(); m.d.attributes()["levels"].set(m.vidres); }}
+  , { "VIDRES",       METAFN { m.vidres = h.get_integer(); m.d.attributes()["rapic_VIDRES"].set(m.vidres); }}
   , { "DBZLVL",       METAFN { m.thresholds = h.get_real_array(); m.d.attributes()["rapic_DBZLVL"].set(m.thresholds); }}
   , { "DBZCALDLVL",   METAFN { m.d.attributes()["rapic_DBZCALDLVL"].set(h.get_real_array()); }}
   , { "DIGCALDLVL",   METAFN { m.d.attributes()["rapic_DIGCALDLVL"].set(h.get_real_array()); }}
@@ -1234,6 +1234,7 @@ void rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
     // done after main header loop since we read back some of the HDF headers below...
     if (new_tilt)
     {
+      hscan.attributes()["product"].set("SCAN");
       hscan.set_bin_count(bins);
       hscan.set_ray_count(s->level_data().rows());
       hscan.set_ray_start(-0.5);
@@ -1333,7 +1334,10 @@ void rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
       {
         auto lvl = ibuf.data()[i];
         if (lvl >= (int) level_convert.size())
-          throw std::runtime_error{"level exceeding threshold table size encountered"};
+        {
+          trace::error() << "level exceeding threshold table size encountered: " << (int) lvl << " / " << level_convert.size();
+          //throw std::runtime_error{"level exceeding threshold table size encountered"};
+        }
         ibuf.data()[i] = level_convert[lvl];
       }
 

@@ -20,7 +20,6 @@
 
 using namespace rainfields;
 
-#if 1
 auto handle_rapic_messages(rapic::client& con) -> void
 {
   rapic::message_type type;
@@ -32,7 +31,7 @@ auto handle_rapic_messages(rapic::client& con) -> void
       {
         rapic::mssg msg;
         con.decode(msg);
-        std::cout << msg.content;
+        trace::log() << msg.content;
       }
       break;
     case rapic::message_type::scan:
@@ -40,27 +39,19 @@ auto handle_rapic_messages(rapic::client& con) -> void
       {
         rapic::scan msg;
         con.decode(msg);
-        std::cout << "SCAN: " << msg.product() << std::endl;
-#if 0
-        std::cout << "SCAN:"
-          << " stn " << msg.stnid
-          << " tilt " << msg.tilt << "/" << msg.tilt_count
-          << " pass " << msg.pass << "/" << msg.pass_count
-          << " " << msg.video
-          << " ts " << msg.timestamp
-          << " volumelabel " << msg.volumelabel
-          << std::endl;
-#endif
+        trace::log() << "SCAN:"
+          << " stn " << msg.station_id()
+          << " pass " << msg.pass() << "/" << msg.pass_count()
+          << " product " << msg.product();
       }
       catch (std::exception& err)
       {
-        std::cerr << "error decoding scan: " << format_exception(err) << std::endl;
+        trace::error() << "error decoding scan: " << format_exception(err);
       }
       break;
     }
   }
 }
-#endif
 
 int main(int argc, char const* argv[])
 {
@@ -72,30 +63,28 @@ int main(int argc, char const* argv[])
     return EXIT_SUCCESS;
   }
 
-  trace::set_min_level(trace::level::debug);
+  trace::set_min_level(trace::level::log);
 
   try
   {
-#if 0
+#if 0 // demo fragment used to debug individual corrupted messages
     // technically the traversal from char to uint8_t here is unsafe
-    std::ifstream in{"tindal_bad"};
+    std::ifstream in{"bad_sellick"};
     std::string buf{std::istreambuf_iterator<char>(in.rdbuf()), std::istreambuf_iterator<char>()};
-
     rapic::scan scan;
     scan.decode(reinterpret_cast<uint8_t const*>(buf.data()), buf.size());
+    trace::log() << "read scan okay";
+#endif
 
-    std::cout << "read scan okay" << std::endl;
-
-#else
     // connect to GPATS
     rapic::client con;
 
-#if 1
+#if 1 // switch between all or just a few radars
     con.add_filter(-1, "ANY");
 #else
     con.add_filter(2, "VOL");
-    //con.add_filter(3, "VOL");
-    //con.add_filter(70, "VOL");
+    con.add_filter(3, "VOL");
+    con.add_filter(70, "VOL");
 #endif
 
     con.connect("cmssdev.bom.gov.au", "15555");
@@ -113,16 +102,15 @@ int main(int argc, char const* argv[])
       // handle remaining messages and return to polling
       handle_rapic_messages(con);
     }
-#endif
   }
   catch (std::exception& err)
   {
-    std::cerr << "fatal error: " << format_exception(err) << std::endl;
+    trace::error() << "fatal error: " << format_exception(err);
     return EXIT_FAILURE;
   }
   catch (...)
   {
-    std::cerr << "fatal error: unknown" << std::endl;
+    trace::error() << "fatal error: unknown";
     return EXIT_FAILURE;
   }
 
