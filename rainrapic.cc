@@ -1100,8 +1100,9 @@ static auto angle_to_index(scan const& s, float angle) -> size_t
   return ray;
 }
 
-void rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<scan> const& scan_set)
+auto rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<scan> const& scan_set) -> time_t
 {
+  time_t vol_time = 0;
   std::decay<decltype(std::declval<scan>().level_data())>::type ibuf;
   array2<float> rbuf;
   array1<int> level_convert;
@@ -1128,7 +1129,8 @@ void rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
     if (t.tm_year < 70) // cope with two digit year, convert to years since 1900
       t.tm_year += 100;
     t.tm_isdst = -1;
-    hvol.set_date_time(timegm(&t));
+    vol_time = timegm(&t);
+    hvol.set_date_time(vol_time);
   }
   {
     int pos = 0;
@@ -1383,4 +1385,6 @@ void rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
       hdata.write(ibuf.data());
     }
   }
+
+  return vol_time;
 }

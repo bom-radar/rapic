@@ -353,5 +353,5 @@ namespace rapic {
    * The tilts and passess will be written out in the order of the list.  That is, the first scan will be
    * written to the ODIM group dataset1/data1.
    */
-  void write_odim_h5_volume(std::string const& path, std::list<scan> const& scan_set);
+  auto write_odim_h5_volume(std::string const& path, std::list<scan> const& scan_set) -> time_t;
 }}
