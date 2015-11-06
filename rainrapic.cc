@@ -1,12 +1,12 @@
 /*------------------------------------------------------------------------------
- * Rapic Data Server client connection API for C++11
+ * Rainfields Rapic Support Library (rainrapic)
  *
  * Copyright (C) 2015 Commonwealth of Australia, Bureau of Meteorology
  * See COPYING for licensing and warranty details
  *
  * Author: Mark Curtis (m.curtis@bom.gov.au)
  *----------------------------------------------------------------------------*/
-#include "rapic_ds.h"
+#include "rainrapic.h"
 
 #include <rainutil/array_utils.h>
 #include <rainutil/trace.h>
@@ -98,7 +98,7 @@ constexpr lookup_value lookup[] =
 
 auto rainfields::rapic::release_tag() -> char const*
 {
-  return RAPIC_DS_RELEASE_TAG;
+  return RAINRAPIC_RELEASE_TAG;
 }
 
 auto header::get_boolean() const -> bool
@@ -505,7 +505,7 @@ client::~client()
 auto client::add_filter(int station, std::string const& product, std::vector<std::string> const& moments) -> void
 {
   if (socket_ != -1)
-    throw std::runtime_error{"rapic_ds: add_filter called while connected"};
+    throw std::runtime_error{"rainrapic: add_filter called while connected"};
 
   // RPFILTER
   // :station number (-1 = all)
@@ -524,7 +524,7 @@ auto client::add_filter(int station, std::string const& product, std::vector<std
 auto client::connect(std::string address, std::string service) -> void
 {
   if (socket_ != -1)
-    throw std::runtime_error{"rapic_ds: connect called while already connected"};
+    throw std::runtime_error{"rainrapic: connect called while already connected"};
 
   // store connection details
   address_ = std::move(address);
@@ -542,7 +542,7 @@ auto client::connect(std::string address, std::string service) -> void
   hints.ai_socktype = SOCK_STREAM;
   int ret = getaddrinfo(address_.c_str(), service_.c_str(), &hints, &addr);
   if (ret != 0 || addr == nullptr)
-    throw std::runtime_error{"rapic_ds: unable to resolve server address"};
+    throw std::runtime_error{"rainrapic: unable to resolve server address"};
 
   // TODO - loop through all addresses?
   if (addr->ai_next)
@@ -555,7 +555,7 @@ auto client::connect(std::string address, std::string service) -> void
   if (socket_ == -1)
   {
     freeaddrinfo(addr);
-    throw std::system_error{errno, std::system_category(), "rapic_ds: socket creation failed"};
+    throw std::system_error{errno, std::system_category(), "rainrapic: socket creation failed"};
   }
 
   // set non-blocking I/O
@@ -564,13 +564,13 @@ auto client::connect(std::string address, std::string service) -> void
   {
     disconnect();
     freeaddrinfo(addr);
-    throw std::system_error{errno, std::system_category(), "rapic_ds: failed to read socket flags"};
+    throw std::system_error{errno, std::system_category(), "rainrapic: failed to read socket flags"};
   }
   if (fcntl(socket_, F_SETFL, flags | O_NONBLOCK) == -1)
   {
     disconnect();
     freeaddrinfo(addr);
-    throw std::system_error{errno, std::system_category(), "rapic_ds: failed to set socket flags"};
+    throw std::system_error{errno, std::system_category(), "rainrapic: failed to set socket flags"};
   }
 
   // connect to the remote host
@@ -581,7 +581,7 @@ auto client::connect(std::string address, std::string service) -> void
     {
       disconnect();
       freeaddrinfo(addr);
-      throw std::system_error{errno, std::system_category(), "rapic_ds: failed to establish connection"};
+      throw std::system_error{errno, std::system_category(), "rainrapic: failed to establish connection"};
     }
     establish_wait_ = true;
   }
@@ -625,7 +625,7 @@ auto client::poll_write() const -> bool
 auto client::poll(int timeout) const -> void
 {
   if (socket_ == -1)
-    throw std::runtime_error{"rapic_ds: attempt to poll while disconnected"};
+    throw std::runtime_error{"rainrapic: attempt to poll while disconnected"};
 
   struct pollfd fds;
   fds.fd = socket_;
@@ -649,7 +649,7 @@ auto client::process_traffic() -> bool
     if (getsockopt(socket_, SOL_SOCKET, SO_ERROR, &res, &len) < 0)
     {
       disconnect();
-      throw std::system_error{errno, std::system_category(), "rapic_ds: getsockopt failure"};
+      throw std::system_error{errno, std::system_category(), "rainrapic: getsockopt failure"};
     }
 
     // not connected yet?
@@ -660,7 +660,7 @@ auto client::process_traffic() -> bool
     if (res < 0)
     {
       disconnect();
-      throw std::system_error{res, std::system_category(), "rapic_ds: failed to establish connection (async)"};
+      throw std::system_error{res, std::system_category(), "rainrapic: failed to establish connection (async)"};
     }
 
     establish_wait_ = false;
@@ -721,7 +721,7 @@ auto client::process_traffic() -> bool
       // a real receive error - kill the connection
       auto err = errno;
       disconnect();
-      throw std::system_error{err, std::system_category(), "rapic_ds: recv failure"};
+      throw std::system_error{err, std::system_category(), "rainrapic: recv failure"};
     }
     else /* if (bytes == 0) */
     {
@@ -802,7 +802,7 @@ auto client::dequeue(message_type& type) -> bool
 
   // if the buffer is full but we still cannot read a message then we are in overflow, fail hard
   if (wc - rcount_ == capacity_)
-    throw std::runtime_error{"rapic_ds: buffer overflow (try increasing buffer size)"};
+    throw std::runtime_error{"rainrapic: buffer overflow (try increasing buffer size)"};
   
   return false;
 }
@@ -847,9 +847,9 @@ auto client::check_cur_type(message_type type) -> void
   if (cur_type_ != type)
   {
     if (cur_type_ == no_message)
-      throw std::runtime_error{"gpats: no message dequeued for decoding"};
+      throw std::runtime_error{"rainrapic: no message dequeued for decoding"};
     else
-      throw std::runtime_error{"gpats: incorrect type passed for decoding"};
+      throw std::runtime_error{"rainrapic: incorrect type passed for decoding"};
   }
 }
 

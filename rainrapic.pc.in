@@ -3,9 +3,9 @@ exec_prefix=@CMAKE_INSTALL_PREFIX@
 libdir=@INSTALL_LIB_DIR@
 includedir=@INSTALL_INCLUDE_DIR@
 
-Name: gpats
-Description: GPATS client connection API for C++11 or later
-Version: @GPATS_VERSION@
-Libs: -L${libdir} -lgpats
+Name: rainrapic
+Description: Rainfields rapic support library
+Version: @RAINRAPIC_VERSION@
+Libs: -L${libdir} -lrainrapic
 Cflags: -I${includedir}
 

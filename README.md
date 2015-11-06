@@ -1,4 +1,4 @@
-# Rapic Data Server client connection API for C++11
+# Rainfields Rapic Support Library
 
 This library implements the rapic client protocol and makes it easy for you to
 integrate live radar data into your application.
@@ -39,8 +39,8 @@ To build and run this project, from within the 'build' directory above type:
 To use the library within your project use pkg-config to determine the correct
 compile and link flags:
 
-    pkg-config --cflags rapic_ds
-    pkg-config --libs rapic_ds
+    pkg-config --cflags rainrapic
+    pkg-config --libs rainrapic
 
 The library is written in C++11.  It will not compile on compilers that lack
 support for this version of C++ or later.  Depending on your compiler you may
@@ -48,9 +48,9 @@ need to explicitly enable C++11 support by adding the '-std=c++11' flag.
 
 For example:
 
-    g++ -std=c++11 $(pkg-config --cflags --libs rapic_ds) my_project.cc
+    g++ -std=c++11 $(pkg-config --cflags --libs rainrapic) my_project.cc
   
-If pkg-config cannot find the gpats package, ensure that you have set your
+If pkg-config cannot find the rainrapic package, ensure that you have set your
 PKG_CONFIG_PATH environment variable correctly for the install prefix which
 installed the library to.  For example, in the ${HOME}/local example above
 the following will set the correct PKG_CONFIG_PATH:
@@ -60,6 +60,6 @@ the following will set the correct PKG_CONFIG_PATH:
 
 ## Using the API
 -------------------------------------------------------------------------------
-Please consult the rapic_ds.h header and the source of demo.cc for examples on
+Please consult the rainrapic.h header and the source of demo.cc for examples on
 how to use the API within your code.
 

@@ -1,5 +1,5 @@
 /*------------------------------------------------------------------------------
- * Rapic Data Server client connection API for C++11
+ * Rainfields Rapic Support Library (rainrapic)
  *
  * Copyright (C) 2015 Commonwealth of Australia, Bureau of Meteorology
  * See COPYING for licensing and warranty details
@@ -10,7 +10,6 @@
 
 #include <rainutil/array.h>
 #include <rainutil/real.h>
-#include <rainutil/timestamp.h>
 
 #include <atomic>
 #include <bitset>
@@ -167,11 +166,6 @@ namespace rapic {
 
     /// Access the scan data encoded as levels
     auto level_data() const -> array2<uint8_t> const&                 { return level_data_; }
-
-    /// Access the scan data as native moment values
-    /** If the correct conversion from level data to moment data cannot be determined this function will throw
-     *  an exception. */
-    auto scan_data() const -> array2<float>;
 
   private:
     auto get_header_string(char const* name) const -> std::string const&;

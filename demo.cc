@@ -1,12 +1,12 @@
 /*------------------------------------------------------------------------------
- * Rapic Data Server client connection API for C++11
+ * Rainfields Rapic Support Library (rainrapic)
  *
  * Copyright (C) 2015 Commonwealth of Australia, Bureau of Meteorology
  * See COPYING for licensing and warranty details
  *
  * Author: Mark Curtis (m.curtis@bom.gov.au)
  *----------------------------------------------------------------------------*/
-#include "rapic_ds.h"
+#include "rainrapic.h"
 
 #include <rainutil/trace.h>
 
@@ -59,7 +59,7 @@ int main(int argc, char const* argv[])
       && (   strcmp(argv[1], "-v") == 0
           || strcmp(argv[1], "--version") == 0))
   {
-    std::cout << "Rapic client library demo\nVersion: " << rapic::release_tag() << std::endl;
+    std::cout << "Rainfields rapic support library demo\nVersion: " << rapic::release_tag() << std::endl;
     return EXIT_SUCCESS;
   }
 
@@ -76,7 +76,7 @@ int main(int argc, char const* argv[])
     trace::log() << "read scan okay";
 #endif
 
-    // connect to GPATS
+    // connect to a ROWLF server
     rapic::client con;
 
 #if 1 // switch between all or just a few radars
