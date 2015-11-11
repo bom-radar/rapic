@@ -965,9 +965,9 @@ static std::map<std::string, odim_meta_fn> const header_map =
   , { "WMONUMBER",    METAFN { }} // ignored - special processing
   , { "COUNTRY",      METAFN { }} // ignored - special processing
   , { "IMGFMT",       METAFN { }} // ignored - implicit in ODIM_H5 product type
-  , { "LATITUDE",     METAFN { m.v.set_latitude(h.get_real() * -1.0); }}
-  , { "LONGITUDE",    METAFN { m.v.set_longitude(h.get_real()); }}
-  , { "HEIGHT",       METAFN { m.v.set_height(h.get_real()); }}
+  , { "LATITUDE",     METAFN { }} // ignored - special processing
+  , { "LONGITUDE",    METAFN { }} // ignored - special processing
+  , { "HEIGHT",       METAFN { }} // ignored - special processing
   , { "RADARTYPE",    METAFN { m.v.attributes()["system"].set(h.value()); }}
   , { "PRODUCT",      METAFN { m.v.attributes()["rapic_PRODUCT"].set(h.value()); }}
   , { "VOLUMEID",     METAFN { m.v.attributes()["rapic_VOLUMEID"].set(h.get_integer()); }}
@@ -1169,6 +1169,33 @@ auto rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
 
     buf[127] = '\0';
     hvol.set_source(buf);
+  }
+  if (auto p = scan_set.front().find_header("LATITUDE"))
+  {
+    hvol.set_latitude(p->get_real() * -1.0);
+  }
+  else
+  {
+    trace::warning() << "missing LATITUDE header, using -999.0 as placeholder";
+    hvol.set_latitude(-999.0);
+  }
+  if (auto p = scan_set.front().find_header("LONGITUDE"))
+  {
+    hvol.set_longitude(p->get_real());
+  }
+  else
+  {
+    trace::warning() << "missing LONGITUDE header, using -999.0 as placeholder";
+    hvol.set_longitude(-999.0);
+  }
+  if (auto p = scan_set.front().find_header("HEIGHT"))
+  {
+    hvol.set_height(p->get_real());
+  }
+  else
+  {
+    trace::warning() << "missing HEIGHT header, using -999.0 as placeholder";
+    hvol.set_height(-999.0);
   }
 
   // add each scan to the volume
