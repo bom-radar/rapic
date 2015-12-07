@@ -160,7 +160,7 @@ auto scan::reset() -> void
   angle_resolution_ = nan<float>();
 }
 
-auto scan::decode(uint8_t const* in, size_t size) -> void
+auto scan::decode(uint8_t const* in, size_t size) -> size_t
 try
 {
   reset();
@@ -317,7 +317,7 @@ try
         // valid end of scan?
         if (   pos2 - pos == msg_scan_term.size()
             && strncmp(reinterpret_cast<char const*>(&in[pos]), msg_scan_term.c_str(), msg_scan_term.size()) == 0)
-          return;
+          return pos + msg_scan_term.size();
         throw std::runtime_error{"corrupt scan detected (3)"};
       }
 

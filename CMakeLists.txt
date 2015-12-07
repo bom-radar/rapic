@@ -94,6 +94,10 @@ install(TARGETS rainrapic
 configure_file(rainrapic.pc.in "${PROJECT_BINARY_DIR}/rainrapic.pc" @ONLY)
 install(FILES "${PROJECT_BINARY_DIR}/rainrapic.pc" DESTINATION "${INSTALL_LIB_DIR}/pkgconfig")
 
+# build our rapic to odim convertor
+add_executable(rapic_to_odim rapic_to_odim.cc)
+target_link_libraries(rapic_to_odim rainrapic)
+
 # build our demo application (not in the 'all' target.  type 'make demo' to build)
 add_executable(demo demo.cc)
 target_link_libraries(demo rainrapic)

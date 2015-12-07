@@ -115,7 +115,8 @@ namespace rapic {
     auto reset() -> void;
 
     /// Decode a scan from the raw wire format
-    auto decode(uint8_t const* in, size_t size) -> void;
+    /** Returns number of bytes consumed from in buffer */
+    auto decode(uint8_t const* in, size_t size) -> size_t;
 
     /// Get the station identifier
     auto station_id() const -> int                                    { return station_id_; }
