@@ -41,6 +41,7 @@ endif()
 
 # customizable install locations
 set(INSTALL_LIB_DIR ${DEF_INSTALL_LIB_DIR} CACHE PATH "Installation directory for libraries")
+set(INSTALL_BIN_DIR bin CACHE PATH "Installation directory for executables")
 set(INSTALL_INCLUDE_DIR include CACHE PATH "Installation directory for header files")
 set(INSTALL_CMAKE_DIR ${DEF_INSTALL_CMAKE_DIR} CACHE PATH "Installation directory for CMake files")
 
@@ -97,6 +98,7 @@ install(FILES "${PROJECT_BINARY_DIR}/rainrapic.pc" DESTINATION "${INSTALL_LIB_DI
 # build our rapic to odim convertor
 add_executable(rapic_to_odim rapic_to_odim.cc)
 target_link_libraries(rapic_to_odim rainrapic)
+install(TARGETS rapic_to_odim DESTINATION "${INSTALL_BIN_DIR}")
 
 # build our demo application (not in the 'all' target.  type 'make demo' to build)
 add_executable(demo demo.cc)
