@@ -9,11 +9,11 @@
 #pragma once
 
 #include <rainutil/array.h>
-#include <rainutil/real.h>
 
 #include <atomic>
 #include <bitset>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
@@ -78,11 +78,13 @@ namespace rapic {
   {
   public:
     ray()
-      : azimuth_{nan<float>()}, elevation_{nan<float>()}, time_offset_{-1}
+      : azimuth_{std::numeric_limits<float>::quiet_NaN()}
+      , elevation_{std::numeric_limits<float>::quiet_NaN()}
+      , time_offset_{-1}
     { }
 
     ray(float azimuth)
-      : azimuth_{azimuth}, elevation_{nan<float>()}, time_offset_{-1} 
+      : azimuth_{azimuth}, elevation_{std::numeric_limits<float>::quiet_NaN()}, time_offset_{-1}
     { }
 
     ray(float azimuth, float elevation, int time_offset)
@@ -353,6 +355,13 @@ namespace rapic {
    *
    * The tilts and passess will be written out in the order of the list.  That is, the first scan will be
    * written to the ODIM group dataset1/data1.
+   *
+   * A custom function may be provided in the third argument to provide a mechanism for reporting warnings
+   * during the conversion process.
    */
-  auto write_odim_h5_volume(std::string const& path, std::list<scan> const& scan_set) -> time_t;
+  auto write_odim_h5_volume(
+        std::string const& path
+      , std::list<scan> const& scan_set
+      , std::function<void(char const*)> log_fn = [](char const*) { }
+      ) -> time_t;
 }}

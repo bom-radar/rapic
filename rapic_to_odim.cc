@@ -127,7 +127,7 @@ int main(int argc, char* argv[])
     }
 
     // convert the list of scans into a volume
-    rapic::write_odim_h5_volume(path_output, scans);
+    rapic::write_odim_h5_volume(path_output, scans, [](char const* msg) { trace::warning() << msg; });
   }
   catch (std::exception& err)
   {

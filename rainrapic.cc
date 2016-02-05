@@ -8,16 +8,13 @@
  *----------------------------------------------------------------------------*/
 #include "rainrapic.h"
 
-#include <rainutil/array_utils.h>
-#include <rainutil/trace.h>
-#include <rainutil/string_utils.h>
-
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <algorithm>
 #include <cerrno>
 #include <cmath>
 #include <ctime>
@@ -120,22 +117,66 @@ auto header::get_boolean() const -> bool
 
 auto header::get_integer() const -> long
 {
-  return from_string<long>(value_, 10);
+  return std::stol(value_, nullptr, 10);
 }
 
 auto header::get_real() const -> double
 {
-  return from_string<double>(value_);
+  return std::stod(value_);
 }
 
 auto header::get_integer_array() const -> std::vector<long>
 {
-  return tokenize<long>(value_, " ", 10);
+  std::vector<long> ret;
+  auto pos = value_.c_str();
+  while (*pos != '\0')
+  {
+    char* end;
+    auto val = strtol(pos, &end, 10);
+
+    // did the conversion fail?
+    if (val == 0 && end == pos)
+    {
+      // check if it is just trailing spaces
+      while (*pos == ' ')
+        ++pos;
+      if (*pos != '\0')
+        throw std::runtime_error{"bad integer value"};
+    }
+    else
+    {
+      ret.push_back(val);
+      pos = end;
+    }
+  }
+  return ret;
 }
 
 auto header::get_real_array() const -> std::vector<double>
 {
-  return tokenize<double>(value_, " ");
+  std::vector<double> ret;
+  auto pos = value_.c_str();
+  while (*pos != '\0')
+  {
+    char* end;
+    auto val = strtod(pos, &end);
+
+    // did the conversion fail?
+    if (val == 0 && end == pos)
+    {
+      // check if it is just trailing spaces
+      while (*pos == ' ')
+        ++pos;
+      if (*pos != '\0')
+        throw std::runtime_error{"bad double value"};
+    }
+    else
+    {
+      ret.push_back(val);
+      pos = end;
+    }
+  }
+  return ret;
 }
 
 scan::scan()
@@ -155,9 +196,9 @@ auto scan::reset() -> void
   pass_ = -1;
   pass_count_ = -1;
   is_rhi_ = false;
-  angle_min_ = nan<float>();
-  angle_max_ = nan<float>();
-  angle_resolution_ = nan<float>();
+  angle_min_ = std::numeric_limits<float>::quiet_NaN();
+  angle_max_ = std::numeric_limits<float>::quiet_NaN();
+  angle_resolution_ = std::numeric_limits<float>::quiet_NaN();
 }
 
 auto scan::decode(uint8_t const* in, size_t size) -> size_t
@@ -349,7 +390,7 @@ try
 }
 catch (std::exception& err)
 {
-  msg desc;
+  std::ostringstream desc;
   desc << "failed to decode scan";
   if (auto p = find_header("STNID"))
     desc << " stnid: " << p->value();
@@ -363,7 +404,7 @@ catch (std::exception& err)
     desc << " pass: " << p->value();
   if (auto p = find_header("VIDEO"))
     desc << " video: " << p->value();
-  std::throw_with_nested(std::runtime_error{desc});
+  std::throw_with_nested(std::runtime_error{desc.str()});
 }
 
 auto scan::find_header(char const* name) const -> header const*
@@ -378,21 +419,21 @@ auto scan::get_header_string(char const* name) const -> std::string const&
 {
   if (auto p = find_header(name))
     return p->value();
-  throw std::runtime_error{msg{} << "missing mandatory header " << name};
+  throw std::runtime_error{std::string("missing mandatory header ") + name};
 }
 
 auto scan::get_header_integer(char const* name) const -> long
 {
   if (auto p = find_header(name))
     return p->get_integer();
-  throw std::runtime_error{msg{} << "missing mandatory header " << name};
+  throw std::runtime_error{std::string("missing mandatory header ") + name};
 }
 
 auto scan::get_header_real(char const* name) const -> double
 {
   if (auto p = find_header(name))
     return p->get_real();
-  throw std::runtime_error{msg{} << "missing mandatory header " << name};
+  throw std::runtime_error{std::string("missing mandatory header ") + name};
 }
 
 auto scan::initialize_rays() -> void
@@ -442,7 +483,7 @@ auto scan::initialize_rays() -> void
 
   rays_.reserve(rays);
   level_data_.resize(rays, bins);
-  array_utils::fill(level_data_, 0);
+  std::fill(level_data_.begin(), level_data_.end(), 0);
 }
 
 client::client(size_t buffer_size, time_t keepalive_period)
@@ -914,7 +955,7 @@ static auto rapic_timestamp_to_time_t(char const* str) -> time_t
 namespace {
 struct quantity
 {
-  quantity(char const* hname, char const* vname, float gain = nan<float>(), float offset = nan<float>())
+  quantity(char const* hname, char const* vname, float gain = std::numeric_limits<float>::quiet_NaN(), float offset = std::numeric_limits<float>::quiet_NaN())
     : hname{hname}, vname{vname}, odim_gain{gain}, odim_offset{offset}
   { }
 
@@ -951,7 +992,7 @@ struct meta_extra
   std::string vidgain;
   std::string vidoffset;
   std::vector<double>  thresholds;
-  double      maxvel = nan<double>();
+  double      maxvel = std::numeric_limits<double>::quiet_NaN();
   long        vidres = 0;
 };
 using odim_meta_fn = void (*)(header const&, meta_extra&);
@@ -1020,7 +1061,7 @@ static std::map<std::string, odim_meta_fn> const header_map =
   , { "NYQUIST",      METAFN
       {
         auto val = h.get_real();
-        if (is_nan(m.maxvel))
+        if (isnan(m.maxvel))
           m.maxvel = val;
         m.t.attributes()["NI"].set(val);
       }
@@ -1100,7 +1141,11 @@ static auto angle_to_index(scan const& s, float angle) -> size_t
   return ray;
 }
 
-auto rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<scan> const& scan_set) -> time_t
+auto rainfields::rapic::write_odim_h5_volume(
+      std::string const& path
+    , std::list<scan> const& scan_set
+    , std::function<void(char const*)> log_fn
+    ) -> time_t
 {
   time_t vol_time = 0;
   std::decay<decltype(std::declval<scan>().level_data())>::type ibuf;
@@ -1147,7 +1192,7 @@ auto rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
       }
       else
       {
-        trace::warning() << "unknown country code, using 000 and XX as placeholders";
+        log_fn("unknown country code, using 000 and XX as placeholders");
         ctyn = 0;
         ctys = "XX";
       }
@@ -1176,7 +1221,7 @@ auto rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
   }
   else
   {
-    trace::warning() << "missing LATITUDE header, using -999.0 as placeholder";
+    log_fn("missing LATITUDE header, using -999.0 as placeholder");
     hvol.set_latitude(-999.0);
   }
   if (auto p = scan_set.front().find_header("LONGITUDE"))
@@ -1185,7 +1230,7 @@ auto rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
   }
   else
   {
-    trace::warning() << "missing LONGITUDE header, using -999.0 as placeholder";
+    log_fn("missing LONGITUDE header, using -999.0 as placeholder");
     hvol.set_longitude(-999.0);
   }
   if (auto p = scan_set.front().find_header("HEIGHT"))
@@ -1194,7 +1239,7 @@ auto rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
   }
   else
   {
-    trace::warning() << "missing HEIGHT header, using -999.0 as placeholder";
+    log_fn("missing HEIGHT header, using -999.0 as placeholder");
     hvol.set_height(-999.0);
   }
 
@@ -1252,7 +1297,7 @@ auto rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
       auto i = header_map.find(h.name());
       if (i == header_map.end())
       {
-        trace::warning() << "unknown rapic header encountered: " << h.name() << " = " << h.value();
+        log_fn(("unknown rapic header encountered: " + h.name() + " = " + h.value()).c_str());
         hdata.attributes()["rapic_" + h.name()].set(h.value());
       }
       else
@@ -1302,9 +1347,7 @@ auto rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
       // it's a known issue on V8.22
       auto vers = s->find_header("VERS");
       if (!(vers && (vers->value() == "8.21" || vers->value() == "8.22")))
-        trace::warning() 
-          << "no VIDEO header supplied, assuming reflectivity (VERS: " 
-          << s->find_header("VERS")->value() << ")";
+        log_fn(("missing VIDEO header, assuming reflectivity (VERS: " + s->find_header("VERS")->value() + ")").c_str());
       m.video = "Refl";
     }
 
@@ -1320,7 +1363,7 @@ auto rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
     hdata.set_undetect(0.0);
 
     // convert rays from received order and possibly range truncated, to CW from north order full range
-    array_utils::fill(ibuf, 0);
+    std::fill(ibuf.begin(), ibuf.end(), 0);
     for (size_t r = 0; r < s->rays().size(); ++r)
     {
       std::memcpy(
@@ -1334,8 +1377,8 @@ auto rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
     if (!m.thresholds.empty())
     {
       // check that we know how to repack this moment
-      if (vm == video_map.end() || is_nan(vm->second.odim_gain))
-        throw std::runtime_error{msg{} << "thresholded encoding used for unexpected video type '" << m.video << "'"};
+      if (vm == video_map.end() || isnan(vm->second.odim_gain))
+        throw std::runtime_error{std::string("thresholded encoding used for unexpected video type: ") + m.video};
 
       // determine the matching output level for each threshold and
       // check that each threshold level can be exactly represented by the 8-bit encoding
@@ -1351,10 +1394,12 @@ auto rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
         level_convert[i + 1] = o;
         if (std::abs(o - level_convert[i + 1]) > 0.001)
         {
-          trace::warning()
+          std::ostringstream oss;
+          oss
             << "threshold value '" << m.thresholds[i] << "' cannot be represented exactly by 8bit encoding with gain "
             << vm->second.odim_gain << " offset " << vm->second.odim_offset
             << " will be encoded as " << level_convert[i + 1] << " -> " << (level_convert[i + 1] * vm->second.odim_gain + vm->second.odim_offset);
+          log_fn(oss.str().c_str());
         }
       }
 
@@ -1363,10 +1408,7 @@ auto rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
       {
         auto lvl = ibuf.data()[i];
         if (lvl >= (int) level_convert.size())
-        {
-          trace::error() << "level exceeding threshold table size encountered: " << (int) lvl << " / " << level_convert.size();
-          //throw std::runtime_error{"level exceeding threshold table size encountered"};
-        }
+          throw std::runtime_error{"level exceeding threshold table size encountered"};
         ibuf.data()[i] = level_convert[lvl];
       }
 
@@ -1382,15 +1424,15 @@ auto rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
       // gain and offset specified directly by rapic - copy data straight to ODIM
       // we add half of the gain to the rapic offset to convert from the threshold bin lower edge into the bin
       // center value which is the best estimate for the real value we can get
-      auto gain = from_string<double>(m.vidgain);
+      auto gain = std::stod(m.vidgain);
       hdata.set_gain(gain);
-      hdata.set_offset(from_string<double>(m.vidoffset) + 0.5 * gain);
+      hdata.set_offset(std::stod(m.vidoffset) + 0.5 * gain);
       hdata.write(ibuf.data());
     }
     // velocity moment with nyquist or VELLVL supplied?
     else if (m.video == "Vel")
     {
-      if (is_nan(m.maxvel))
+      if (isnan(m.maxvel))
         throw std::runtime_error{"no VELLVL or NYQUIST supplied for default Vel encoded scan"};
 
       // this logic is copied from ConcEncodeClient.cpp (via Ray)
@@ -1405,8 +1447,7 @@ auto rainfields::rapic::write_odim_h5_volume(std::string const& path, std::list<
     // otherwise we don't know what to do - just encode the levels directly
     else
     {
-      trace::warning() << "unable to determine encoding for VIDEO '" << m.video << "', writing levels directly";
-
+      log_fn(("unable to determine encoding for VIDEO '" + m.video + "', writing levels directly").c_str());
       hdata.set_gain(1.0);
       hdata.set_offset(0.0);
       hdata.write(ibuf.data());
