@@ -1,5 +1,5 @@
 #-------------------------------------------------------------------------------
-# Rapic Data Server client connection API
+# Rapic Protocol Support Library
 #
 # Copyright (C) 2015 Commonwealth of Australia, Bureau of Meteorology
 # See COPYING for licensing and warranty details

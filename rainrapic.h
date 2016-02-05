@@ -1,5 +1,5 @@
 /*------------------------------------------------------------------------------
- * Rainfields Rapic Support Library (rainrapic)
+ * Rapic Protocol Support Library
  *
  * Copyright (C) 2015 Commonwealth of Australia, Bureau of Meteorology
  * See COPYING for licensing and warranty details
@@ -18,9 +18,8 @@
 #include <vector>
 #include <list>
 
-namespace rainfields {
-namespace rapic {
-
+namespace rapic
+{
   /// Get the SCM release tag that the library was built from
   auto release_tag() -> char const*;
 
@@ -370,4 +369,4 @@ namespace rapic {
       , std::list<scan> const& scan_set
       , std::function<void(char const*)> log_fn = [](char const*) { }
       ) -> time_t;
-}}
+}

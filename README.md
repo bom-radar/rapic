@@ -1,4 +1,4 @@
-# Rainfields Rapic Support Library
+# Rapic Protocol Support Library
 
 This library implements the rapic client protocol and makes it easy for you to
 integrate live radar data into your application.

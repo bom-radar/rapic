@@ -1,5 +1,5 @@
 /*------------------------------------------------------------------------------
- * Rainfields Rapic Support Library (rainrapic)
+ * Rapic Protocol Support Library
  *
  * Copyright (C) 2015 Commonwealth of Australia, Bureau of Meteorology
  * See COPYING for licensing and warranty details
@@ -26,8 +26,7 @@
 #include <system_error>
 #include <tuple>
 
-using namespace rainfields;
-using namespace rainfields::rapic;
+using namespace rapic;
 
 static constexpr message_type no_message = static_cast<message_type>(-1);
 
@@ -95,7 +94,7 @@ constexpr lookup_value lookup[] =
   lval(152),  lval(153),   lval(154),   lval(155),   lval(156),   lval(157),   lval(158),   lval(159)    // f8-ff
 };
 
-auto rainfields::rapic::release_tag() -> char const*
+auto rapic::release_tag() -> char const*
 {
   return RAINRAPIC_RELEASE_TAG;
 }
@@ -945,6 +944,8 @@ next_i:
 
 #include <rainhdf/rainhdf.h>
 
+namespace hdf = rainfields::hdf;
+
 static auto rapic_timestamp_to_time_t(char const* str) -> time_t
 {
   struct tm t;
@@ -1144,7 +1145,7 @@ static auto angle_to_index(scan const& s, float angle) -> int
   return ray;
 }
 
-auto rainfields::rapic::write_odim_h5_volume(
+auto rapic::write_odim_h5_volume(
       std::string const& path
     , std::list<scan> const& scan_set
     , std::function<void(char const*)> log_fn

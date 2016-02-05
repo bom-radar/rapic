@@ -1,5 +1,5 @@
 /*------------------------------------------------------------------------------
- * Rainfields Rapic Support Library (rainrapic)
+ * Rapic Protocol Support Library
  *
  * Copyright (C) 2015 Commonwealth of Australia, Bureau of Meteorology
  * See COPYING for licensing and warranty details
@@ -13,8 +13,6 @@
 #include <iostream>
 #include <sstream>
 #include <system_error>
-
-using namespace rainfields;
 
 static const char* try_again = "try --help for usage instructions\n";
 static const char* usage_string =
