@@ -8,6 +8,7 @@
  *----------------------------------------------------------------------------*/
 #include "rainrapic.h"
 
+#include <strings.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -17,6 +18,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
+#include <cstring>
 #include <ctime>
 #include <map>
 #include <stdexcept>
@@ -187,8 +189,10 @@ scan::scan()
 auto scan::reset() -> void
 {
   headers_.clear();
-  rays_.clear();
-  level_data_.resize(0, 0);
+  ray_headers_.clear();
+  rays_ = 0;
+  bins_ = 0;
+  level_data_.clear();
 
   station_id_ = -1;
   volume_id_ = -1;
@@ -216,11 +220,11 @@ try
       ++pos;
 
       // if this is our first ray, setup the data structures
-      if (rays_.empty())
+      if (ray_headers_.empty())
         initialize_rays();
 
       // sanity check that we don't have too many rays
-      if (rays_.size() == level_data_.rows())
+      if (static_cast<int>(ray_headers_.size()) == rays_)
         throw std::runtime_error{"scan data overflow (too many rays)"};
 
       // sanity check that we have enough space for at least the header
@@ -234,12 +238,12 @@ try
       pos += is_rhi_ ? 4 : 3;
 
       // create the ray entry
-      rays_.emplace_back(angle);
+      ray_headers_.emplace_back(angle);
       
       // decode the data into levels
-      auto out = level_data_[rays_.size() - 1];
+      auto out = &level_data_[bins_ * (ray_headers_.size() - 1)];
       int prev = 0;
-      size_t bin = 0;
+      int bin = 0;
       while (pos < size)
       {
         auto& cur = lookup[in[pos++]];
@@ -247,7 +251,7 @@ try
         //  absolute pixel value
         if (cur.type == enc_type::value)
         {
-          if (bin < level_data_.cols())
+          if (bin < bins_)
             out[bin++] = prev = cur.val;
           else
             throw std::runtime_error{"scan data overflow (ascii abs)"};
@@ -261,7 +265,7 @@ try
             count *= 10;
             count += lookup[in[pos++]].val;
           }
-          if (bin + count > level_data_.cols())
+          if (bin + count > bins_)
             throw std::runtime_error{"scan data overflow (ascii rle)"};
           for (int i = 0; i < count; ++i)
             out[bin++] = prev;
@@ -271,12 +275,12 @@ try
         // we assume it is just an artefact of the encoding process
         else if (cur.type == enc_type::delta)
         {
-          if (bin < level_data_.cols())
+          if (bin < bins_)
             out[bin++] = prev += cur.val;
           else
             throw std::runtime_error{"scan data overflow (ascii delta)"};
 
-          if (bin < level_data_.cols())
+          if (bin < bins_)
             out[bin++] = prev += cur.val2;
           else if (pos < size && lookup[in[pos]].type != enc_type::terminate)
             throw std::runtime_error{"scan data overflow (ascii delta)"};
@@ -297,11 +301,11 @@ try
       ++pos;
 
       // if this is our first ray, setup the data structures
-      if (rays_.empty())
+      if (ray_headers_.empty())
         initialize_rays();
 
       // sanity check that we don't have too many rays
-      if (rays_.size() == level_data_.rows())
+      if (static_cast<int>(ray_headers_.size()) == rays_)
         throw std::runtime_error{"scan data overflow (too many rays)"};
 
       // sanity check that we have enough space for at least the header
@@ -318,25 +322,25 @@ try
       pos += 18;
 
       // create the ray entry
-      rays_.emplace_back(azi, el, sec);
+      ray_headers_.emplace_back(azi, el, sec);
 
       // decode the data into levels
-      auto out = level_data_[rays_.size() - 1];
-      size_t bin = 0;
+      auto out = &level_data_[bins_ * (ray_headers_.size() - 1)];
+      int bin = 0;
       while (true)
       {
         int val = in[pos++];
         if (val == 0 || val == 1)
         {
-          size_t count = in[pos++];
+          int count = in[pos++];
           if (count == 0)
             break;
-          if (bin + count > level_data_.cols())
+          if (bin + count > bins_)
             throw std::runtime_error{"scan data overflow (binary rle)"};
-          for (size_t i = 0; i < count; ++i)
+          for (int i = 0; i < count; ++i)
             out[bin++] = val;
         }
-        else if (bin < level_data_.cols())
+        else if (bin < bins_)
           out[bin++] = val;
         else
           throw std::runtime_error{"scan data overflow (binary abs)"};
@@ -473,17 +477,16 @@ auto scan::initialize_rays() -> void
     angle_max_ = 360.0f;
   }
 
-  int rays = std::lround((angle_max_ - angle_min_) / angle_resolution_);
+  rays_ = std::lround((angle_max_ - angle_min_) / angle_resolution_);
   if (remainder(angle_max_ - angle_min_, angle_resolution_) > 0.001)
     throw std::runtime_error{"ANGRES is not a factor of sweep length"};
 
-  int bins = std::lround((endrng - startrng) / rngres);
-  if (bins < 0 || remainder(endrng - startrng, rngres) > 0.001)
+  bins_ = std::lround((endrng - startrng) / rngres);
+  if (bins_ < 0 || remainder(endrng - startrng, rngres) > 0.001)
     throw std::runtime_error("RNGRES is not a factor of range span");
 
-  rays_.reserve(rays);
-  level_data_.resize(rays, bins);
-  std::fill(level_data_.begin(), level_data_.end(), 0);
+  ray_headers_.reserve(rays_);
+  level_data_.resize(rays_ * bins_);
 }
 
 client::client(size_t buffer_size, time_t keepalive_period)
@@ -1129,14 +1132,14 @@ static std::map<std::string, odim_meta_fn> const header_map =
 };
 }
 
-static auto angle_to_index(scan const& s, float angle) -> size_t
+static auto angle_to_index(scan const& s, float angle) -> int
 {
   while (angle >= s.angle_max())
     angle -= 360.0f;
   while (angle < s.angle_min())
     angle += 360.0f;
-  size_t ray = std::lround((angle - s.angle_min()) / s.angle_resolution());
-  if (ray >= s.level_data().rows() || std::abs(remainder(angle - s.angle_min(), s.angle_resolution())) > 0.001)
+  int ray = std::lround((angle - s.angle_min()) / s.angle_resolution());
+  if (ray < 0 || ray >= s.rays() || std::abs(remainder(angle - s.angle_min(), s.angle_resolution())) > 0.001)
     throw std::runtime_error{"invalid azimuth angle specified by ray"};
   return ray;
 }
@@ -1148,9 +1151,8 @@ auto rainfields::rapic::write_odim_h5_volume(
     ) -> time_t
 {
   time_t vol_time = 0;
-  std::decay<decltype(std::declval<scan>().level_data())>::type ibuf;
-  array2<float> rbuf;
-  array1<int> level_convert;
+  std::vector<uint8_t> ibuf;
+  std::vector<int> level_convert;
 
   // sanity check
   if (scan_set.empty())
@@ -1245,7 +1247,7 @@ auto rainfields::rapic::write_odim_h5_volume(
 
   // add each scan to the volume
   auto end_tilt = scan_set.begin();
-  size_t bins = 0;
+  int bins = 0;
   for (auto s = scan_set.begin(); s != scan_set.end(); ++s)
   {
     // detect the start of a new tilt
@@ -1258,10 +1260,10 @@ auto rainfields::rapic::write_odim_h5_volume(
       // look ahead and find the end of this tilt, also noting the maximum number of bins
       header const* h = nullptr;
       end_tilt = s;
-      bins = s->level_data().cols();
+      bins = s->bins();
       while (end_tilt != scan_set.end())
       {
-        bins = std::max(bins, end_tilt->level_data().cols());
+        bins = std::max(bins, end_tilt->bins());
         if (htilt && (h = end_tilt->find_header("TILT")))
         {
           if (htilt->value() != h->value())
@@ -1281,13 +1283,12 @@ auto rainfields::rapic::write_odim_h5_volume(
       if (s != scan_set.begin())
         hscan = hvol.scan_append();
 
-      // resize our temporary buffers
-      ibuf.resize(s->level_data().rows(), bins);
-      rbuf.resize(s->level_data().rows(), bins);
+      // resize our temporary buffer
+      ibuf.resize(s->rays() * bins);
     }
 
     // determine the appropriate data type and size
-    size_t dims[2] = { s->level_data().rows(), bins };
+    size_t dims[2] = { static_cast<size_t>(s->rays()), static_cast<size_t>(bins) };
     auto hdata = hscan.data_append(hdf::data::data_type::u8, 2, dims);
 
     // process each header
@@ -1310,15 +1311,15 @@ auto rainfields::rapic::write_odim_h5_volume(
     {
       hscan.attributes()["product"].set("SCAN");
       hscan.set_bin_count(bins);
-      hscan.set_ray_count(s->level_data().rows());
+      hscan.set_ray_count(s->rays());
       hscan.set_ray_start(-0.5);
-      hscan.set_first_ray_radiated(s->rays().empty() ? 0 : angle_to_index(*s, s->rays().front().azimuth()));
+      hscan.set_first_ray_radiated(s->ray_headers().empty() ? 0 : angle_to_index(*s, s->ray_headers().front().azimuth()));
 
       // automatically determine scan end time
-      if (!s->rays().empty() && s->rays().back().time_offset() != -1)
+      if (!s->ray_headers().empty() && s->ray_headers().back().time_offset() != -1)
       {
         // use time of last ray if available
-        hscan.set_end_date_time(hscan.start_date_time() + s->rays().back().time_offset());
+        hscan.set_end_date_time(hscan.start_date_time() + s->ray_headers().back().time_offset());
       }
       else
       {
@@ -1364,12 +1365,12 @@ auto rainfields::rapic::write_odim_h5_volume(
 
     // convert rays from received order and possibly range truncated, to CW from north order full range
     std::fill(ibuf.begin(), ibuf.end(), 0);
-    for (size_t r = 0; r < s->rays().size(); ++r)
+    for (size_t r = 0; r < s->ray_headers().size(); ++r)
     {
       std::memcpy(
-            ibuf[angle_to_index(*s, s->rays()[r].azimuth())]
-          , s->level_data()[r]
-          , s->level_data().cols() * sizeof(uint8_t));
+            &ibuf[angle_to_index(*s, s->ray_headers()[r].azimuth()) * s->bins()]
+          , &s->level_data()[r * s->bins()]
+          , s->bins() * sizeof(uint8_t));
     }
 
     // determine the conversion (if any) to real moment values
@@ -1406,10 +1407,10 @@ auto rainfields::rapic::write_odim_h5_volume(
       // convert between the rapic and odim levels
       for (size_t i = 0; i < ibuf.size(); ++i)
       {
-        auto lvl = ibuf.data()[i];
-        if (lvl >= (int) level_convert.size())
+        int lvl = ibuf[i];
+        if (lvl >= static_cast<int>(level_convert.size()))
           throw std::runtime_error{"level exceeding threshold table size encountered"};
-        ibuf.data()[i] = level_convert[lvl];
+        ibuf[i] = level_convert[lvl];
       }
 
       // write it out

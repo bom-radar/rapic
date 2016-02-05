@@ -54,9 +54,6 @@ foreach(p LIB INCLUDE CMAKE)
 endforeach()
 
 # external dependencies
-find_package(rainutil REQUIRED)
-include_directories(${RAINUTIL_INCLUDE_DIRS})
-
 find_package(rainhdf REQUIRED)
 include_directories(${RAINHDF_INCLUDE_DIRS})
 

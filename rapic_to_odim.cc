@@ -8,18 +8,15 @@
  *----------------------------------------------------------------------------*/
 #include "rainrapic.h"
 
-#include <rainutil/files.h>
-#include <rainutil/string_utils.h>
-#include <rainutil/trace.h>
 #include <getopt.h>
 #include <cstdio>
 #include <iostream>
+#include <sstream>
 #include <system_error>
 
 using namespace rainfields;
 
 static const char* try_again = "try --help for usage instructions\n";
-
 static const char* usage_string =
 R"(Rapic to ODIM_H5 converter
 
@@ -36,17 +33,48 @@ available options:
   -h, --help
       Show this message and exit
 
-  -t, --trace level
-      Set tracing level as one of none|status|error|warning|log|debug (log)
+  -q, --quiet
+      Suppress output of warnings during conversion process
 )";
 
-static const char* short_options = "ht:";
+static const char* short_options = "hq";
 static struct option long_options[] =
 {
-    { "help",         no_argument,       0, 'h' }
-  , { "trace",        required_argument, 0, 't' }
+    { "help",  no_argument, 0, 'h' }
+  , { "quiet", no_argument, 0, 'q' }
   , { 0, 0, 0, 0 }
 };
+
+bool quiet = false;
+
+auto format_nested_exception(std::ostream& ss, const std::exception& err) -> void
+try
+{
+  std::rethrow_if_nested(err);
+}
+catch (const std::exception& sub)
+{
+  ss << "\n  -> " << sub.what();
+  format_nested_exception(ss, sub);
+}
+catch (...)
+{
+  ss << "\n  -> <unknown exception>";
+}
+
+auto format_exception(const std::exception& err) -> std::string
+{
+  std::ostringstream ss;
+  ss << err.what();
+  format_nested_exception(ss, err);
+  return ss.str();
+}
+
+auto log_function(char const* msg) -> void
+{
+  if (!quiet)
+    std::cout << msg << std::endl;
+}
 
 int main(int argc, char* argv[])
 {
@@ -62,8 +90,8 @@ int main(int argc, char* argv[])
     case 'h':
       std::cout << usage_string;
       return EXIT_SUCCESS;
-    case 't':
-      trace::set_min_level(from_string<trace::level>(optarg));
+    case 'q':
+      quiet = true;
       break;
     case '?':
       std::cerr << try_again;
@@ -80,10 +108,11 @@ int main(int argc, char* argv[])
   auto path_input = argv[optind + 0];
   auto path_output = argv[optind + 1];
 
+  FILE* fin = nullptr;
   try
   {
     // read the entire input file into memory
-    file_stream fin{fopen(path_input, "rb")};
+    fin = fopen(path_input, "rb");
     if (!fin)
       throw std::system_error{errno, std::system_category(), "failed to open input file"};
 
@@ -103,8 +132,6 @@ int main(int argc, char* argv[])
     if (fread(buf.get(), 1, len, fin) != len)
       throw std::system_error{errno, std::system_category(), "failed to read input file"};
 
-    fin.reset();
-    
     // find scans and parse them into a list
     std::list<rapic::scan> scans;
     for (size_t i = 0; i < len; ++i)
@@ -127,19 +154,24 @@ int main(int argc, char* argv[])
     }
 
     // convert the list of scans into a volume
-    rapic::write_odim_h5_volume(path_output, scans, [](char const* msg) { trace::warning() << msg; });
+    rapic::write_odim_h5_volume(path_output, scans, log_function);
   }
   catch (std::exception& err)
   {
-    trace::error() << "fatal exception: " << format_exception(err);
+    if (!quiet)
+      std::cout << "fatal exception: " << format_exception(err) << std::endl;
     return EXIT_FAILURE;
   }
   catch (...)
   {
-    trace::error() << "fatal exception: unknown";
+    if (!quiet)
+      std::cout << "fatal exception: unknown" << std::endl;
     return EXIT_FAILURE;
   }
 
+  // ensure the input file is closed nicely
+  if (fin)
+    fclose(fin);
+
   return EXIT_SUCCESS;
 }
-

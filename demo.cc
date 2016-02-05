@@ -8,8 +8,6 @@
  *----------------------------------------------------------------------------*/
 #include "rainrapic.h"
 
-#include <rainutil/trace.h>
-
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -31,7 +29,7 @@ auto handle_rapic_messages(rapic::client& con) -> void
       {
         rapic::mssg msg;
         con.decode(msg);
-        trace::log() << msg.content;
+        std::cout << msg.content << std::endl;
       }
       break;
     case rapic::message_type::scan:
@@ -39,14 +37,15 @@ auto handle_rapic_messages(rapic::client& con) -> void
       {
         rapic::scan msg;
         con.decode(msg);
-        trace::log() << "SCAN:"
+        std::cout << "SCAN:"
           << " stn " << msg.station_id()
           << " pass " << msg.pass() << "/" << msg.pass_count()
-          << " product " << msg.product();
+          << " product " << msg.product()
+          << std::endl;
       }
       catch (std::exception& err)
       {
-        trace::error() << "error decoding scan: " << format_exception(err);
+        std::cout << "error decoding scan: " << err.what() << std::endl;
       }
       break;
     }
@@ -59,11 +58,9 @@ int main(int argc, char const* argv[])
       && (   strcmp(argv[1], "-v") == 0
           || strcmp(argv[1], "--version") == 0))
   {
-    std::cout << "Rainfields rapic support library demo\nVersion: " << rapic::release_tag() << std::endl;
+    std::cout << "Rapic radar protocol support library demo\nVersion: " << rapic::release_tag() << std::endl;
     return EXIT_SUCCESS;
   }
-
-  trace::set_min_level(trace::level::log);
 
   try
   {
@@ -73,7 +70,7 @@ int main(int argc, char const* argv[])
     std::string buf{std::istreambuf_iterator<char>(in.rdbuf()), std::istreambuf_iterator<char>()};
     rapic::scan scan;
     scan.decode(reinterpret_cast<uint8_t const*>(buf.data()), buf.size());
-    trace::log() << "read scan okay";
+    std::cout << "read scan okay" << std::endl;
 #endif
 
     // connect to a ROWLF server
@@ -105,12 +102,12 @@ int main(int argc, char const* argv[])
   }
   catch (std::exception& err)
   {
-    trace::error() << "fatal error: " << format_exception(err);
+    std::cout << "fatal error: " << err.what() << std::endl;
     return EXIT_FAILURE;
   }
   catch (...)
   {
-    trace::error() << "fatal error: unknown";
+    std::cout << "fatal error: unknown" << std::endl;
     return EXIT_FAILURE;
   }
 

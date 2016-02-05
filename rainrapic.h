@@ -8,8 +8,6 @@
  *----------------------------------------------------------------------------*/
 #pragma once
 
-#include <rainutil/array.h>
-
 #include <atomic>
 #include <bitset>
 #include <cstdint>
@@ -74,20 +72,20 @@ namespace rapic {
   };
 
   /// Information about a single ray
-  class ray
+  class ray_header
   {
   public:
-    ray()
+    ray_header()
       : azimuth_{std::numeric_limits<float>::quiet_NaN()}
       , elevation_{std::numeric_limits<float>::quiet_NaN()}
       , time_offset_{-1}
     { }
 
-    ray(float azimuth)
+    ray_header(float azimuth)
       : azimuth_{azimuth}, elevation_{std::numeric_limits<float>::quiet_NaN()}, time_offset_{-1}
     { }
 
-    ray(float azimuth, float elevation, int time_offset)
+    ray_header(float azimuth, float elevation, int time_offset)
       : azimuth_{azimuth}, elevation_{elevation}, time_offset_{time_offset}
     { }
 
@@ -165,10 +163,16 @@ namespace rapic {
     auto find_header(char const* name) const -> header const*;
 
     /// Access the information about each ray
-    auto rays() const -> std::vector<ray> const&                      { return rays_; }
+    auto ray_headers() const -> std::vector<ray_header> const&        { return ray_headers_; }
+
+    /// Get the number of rays (ie: rows) in the level data array
+    auto rays() const -> int                                          { return rays_; }
+
+    /// Get the number of bins (ie: columns) in the level data array
+    auto bins() const -> int                                          { return bins_; }
 
     /// Access the scan data encoded as levels
-    auto level_data() const -> array2<uint8_t> const&                 { return level_data_; }
+    auto level_data() const -> uint8_t const*                         { return level_data_.data(); }
 
   private:
     auto get_header_string(char const* name) const -> std::string const&;
@@ -177,9 +181,11 @@ namespace rapic {
     auto initialize_rays() -> void;
 
   private:
-    std::vector<header> headers_;     // scan headers
-    std::vector<ray>    rays_;        // ray headers
-    array2<uint8_t>     level_data_;  // level encoded scan data
+    std::vector<header>     headers_;     // scan headers
+    std::vector<ray_header> ray_headers_; // ray headers
+    int                     rays_;
+    int                     bins_;
+    std::vector<uint8_t>    level_data_;  // level encoded scan data
 
     // these are cached from the headers structure due to likelyhood of frequent access
     int         station_id_;
