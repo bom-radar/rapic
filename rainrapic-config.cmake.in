@@ -1,9 +1,0 @@
-# Config file for the rainrapic package
-# Defines the following variables:
-#  RAINRAPIC_INCLUDE_DIRS - include directories for rainrapic
-#  RAINRAPIC_LIBRARIES    - libraries to link against
-
-get_filename_component(RAINRAPIC_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
-include("${RAINRAPIC_CMAKE_DIR}/rainrapic-targets.cmake")
-set(RAINRAPIC_INCLUDE_DIRS "@CONF_INCLUDE_DIRS@")
-set(RAINRAPIC_LIBRARIES rainrapic)

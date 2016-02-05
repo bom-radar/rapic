@@ -3,9 +3,9 @@ exec_prefix=@CMAKE_INSTALL_PREFIX@
 libdir=@INSTALL_LIB_DIR@
 includedir=@INSTALL_INCLUDE_DIR@
 
-Name: rainrapic
+Name: rapic
 Description: Rapic protocol support library
-Version: @RAINRAPIC_VERSION@
-Libs: -L${libdir} -lrainrapic
+Version: @RAPIC_VERSION@
+Libs: -L${libdir} -lrapic
 Cflags: -I${includedir}
 

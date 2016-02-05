@@ -6,7 +6,7 @@
  *
  * Author: Mark Curtis (m.curtis@bom.gov.au)
  *----------------------------------------------------------------------------*/
-#include "rainrapic.h"
+#include "rapic.h"
 
 #include <getopt.h>
 #include <cstdio>
