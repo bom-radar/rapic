@@ -54,8 +54,8 @@ foreach(p LIB INCLUDE CMAKE)
 endforeach()
 
 # external dependencies
-find_package(rainhdf REQUIRED)
-include_directories(${RAINHDF_INCLUDE_DIRS})
+find_package(odim_h5 REQUIRED)
+include_directories(${ODIM_H5_INCLUDE_DIRS})
 
 # extract sourcee tree version information from git
 find_package(Git)
@@ -64,7 +64,8 @@ if(GIT_FOUND)
     COMMAND "${GIT_EXECUTABLE}" describe --dirty
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
     OUTPUT_VARIABLE RAPIC_RELEASE_TAG
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
 endif()
 if(NOT DEFINED RAPIC_RELEASE_TAG OR "${RAPIC_RELEASE_TAG}" STREQUAL "")
   set(RAPIC_RELEASE_TAG "unknown-version")
@@ -79,7 +80,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -pedantic -Wextra -Wno-unused-para
 
 # build our library
 add_library(rapic SHARED rapic.h rapic.cc odim.cc)
-target_link_libraries(rapic ${RAINHDF_LIBRARIES})
+target_link_libraries(rapic ${ODIM_H5_LIBRARIES})
 set_target_properties(rapic PROPERTIES VERSION "${RAPIC_VERSION}")
 set_target_properties(rapic PROPERTIES PUBLIC_HEADER rapic.h)
 install(TARGETS rapic

@@ -7,14 +7,13 @@
  * Author: Mark Curtis (m.curtis@bom.gov.au)
  *----------------------------------------------------------------------------*/
 #include "rapic.h"
-#include <rainhdf/rainhdf.h>
+#include <odim_h5.h>
 #include <cmath>
 #include <cstring>
 #include <map>
 #include <sstream>
 
 using namespace rapic;
-namespace hdf = rainfields::hdf;
 
 static auto rapic_timestamp_to_time_t(char const* str) -> time_t
 {
@@ -42,14 +41,14 @@ namespace
 
   struct meta_extra
   {
-    meta_extra(scan const& s, hdf::polar_volume& v, hdf::scan& t, hdf::data& d)
+    meta_extra(scan const& s, odim_h5::polar_volume& v, odim_h5::scan& t, odim_h5::data& d)
       : s(s), v(v), t(t), d(d)
     { }
 
     scan const& s;
-    hdf::polar_volume& v;
-    hdf::scan& t;
-    hdf::data& d;
+    odim_h5::polar_volume& v;
+    odim_h5::scan& t;
+    odim_h5::data& d;
 
     bool        vpol = false;
     std::string video;
@@ -234,7 +233,7 @@ auto rapic::write_odim_h5_volume(
     throw std::runtime_error{"empty scan set"};
 
   // initialize the volume file
-  auto hvol = hdf::polar_volume{path, hdf::file::io_mode::create};
+  auto hvol = odim_h5::polar_volume{path, odim_h5::file::io_mode::create};
 
   // initialize the first scan
   auto hscan = hvol.scan_append();
@@ -364,7 +363,7 @@ auto rapic::write_odim_h5_volume(
 
     // determine the appropriate data type and size
     size_t dims[2] = { static_cast<size_t>(s->rays()), static_cast<size_t>(bins) };
-    auto hdata = hscan.data_append(hdf::data::data_type::u8, 2, dims);
+    auto hdata = hscan.data_append(odim_h5::data::data_type::u8, 2, dims);
 
     // process each header
     meta_extra m{*s, hvol, hscan, hdata};
