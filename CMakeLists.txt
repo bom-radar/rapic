@@ -78,7 +78,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -pedantic -Wextra -Wno-unused-parameter")
 
 # build our library
-add_library(rapic SHARED rapic.cc rapic.h)
+add_library(rapic SHARED rapic.h rapic.cc odim.cc)
 target_link_libraries(rapic ${RAINHDF_LIBRARIES})
 set_target_properties(rapic PROPERTIES VERSION "${RAPIC_VERSION}")
 set_target_properties(rapic PROPERTIES PUBLIC_HEADER rapic.h)
