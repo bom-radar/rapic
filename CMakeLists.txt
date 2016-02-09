@@ -1,8 +1,19 @@
 #-------------------------------------------------------------------------------
 # Rapic Protocol Support Library
 #
-# Copyright (C) 2015 Commonwealth of Australia, Bureau of Meteorology
-# See COPYING for licensing and warranty details
+# Copyright 2016 Commonwealth of Australia, Bureau of Meteorology
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #-------------------------------------------------------------------------------
 cmake_minimum_required(VERSION 2.8)
 
@@ -54,8 +65,15 @@ foreach(p LIB INCLUDE CMAKE)
 endforeach()
 
 # external dependencies
-find_package(odim_h5 REQUIRED)
-include_directories(${ODIM_H5_INCLUDE_DIRS})
+find_package(odim_h5)
+if (odim_h5_FOUND)
+  add_definitions("-DRAPIC_WITH_ODIM")
+  include_directories(${ODIM_H5_INCLUDE_DIRS})
+  set(ODIM_SRC odim.cc)
+  set(API_DEPS odim_h5)
+else()
+  message("odim_h5 library not found, will not build ODIM conversion support or utility")
+endif()
 
 # extract sourcee tree version information from git
 find_package(Git)
@@ -79,7 +97,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -pedantic -Wextra -Wno-unused-parameter")
 
 # build our library
-add_library(rapic SHARED rapic.h rapic.cc odim.cc)
+add_library(rapic SHARED rapic.h rapic.cc ${ODIM_SRC})
 target_link_libraries(rapic ${ODIM_H5_LIBRARIES})
 set_target_properties(rapic PROPERTIES VERSION "${RAPIC_VERSION}")
 set_target_properties(rapic PROPERTIES PUBLIC_HEADER rapic.h)
@@ -94,9 +112,11 @@ configure_file(rapic.pc.in "${PROJECT_BINARY_DIR}/rapic.pc" @ONLY)
 install(FILES "${PROJECT_BINARY_DIR}/rapic.pc" DESTINATION "${INSTALL_LIB_DIR}/pkgconfig")
 
 # build our rapic to odim convertor
-add_executable(rapic_to_odim rapic_to_odim.cc)
-target_link_libraries(rapic_to_odim rapic)
-install(TARGETS rapic_to_odim DESTINATION "${INSTALL_BIN_DIR}")
+if (odim_h5_FOUND)
+  add_executable(rapic_to_odim rapic_to_odim.cc)
+  target_link_libraries(rapic_to_odim rapic)
+  install(TARGETS rapic_to_odim DESTINATION "${INSTALL_BIN_DIR}")
+endif()
 
 # build our demo application (not in the 'all' target.  type 'make demo' to build)
 add_executable(demo demo.cc)

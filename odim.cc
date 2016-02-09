@@ -1,12 +1,36 @@
 /*------------------------------------------------------------------------------
  * Rapic Protocol Support Library
  *
- * Copyright (C) 2015 Commonwealth of Australia, Bureau of Meteorology
- * See COPYING for licensing and warranty details
+ * Copyright 2016 Commonwealth of Australia, Bureau of Meteorology
  *
- * Author: Mark Curtis (m.curtis@bom.gov.au)
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *----------------------------------------------------------------------------*/
 #include "rapic.h"
+#include <stdexcept>
+
+#ifndef RAPIC_WITH_ODIM
+
+auto rapic::write_odim_h5_volume(
+      std::string const& path
+    , std::list<scan> const& scan_set
+    , std::function<void(char const*)> log_fn
+    ) -> time_t
+{
+  throw std::logic_error{"rapic library compiled without ODIM support"};
+}
+
+#else
+
 #include <odim_h5.h>
 #include <cmath>
 #include <cstring>
@@ -531,3 +555,4 @@ auto rapic::write_odim_h5_volume(
 
   return vol_time;
 }
+#endif

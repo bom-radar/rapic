@@ -6,6 +6,7 @@ includedir=@INSTALL_INCLUDE_DIR@
 Name: rapic
 Description: Rapic protocol support library
 Version: @RAPIC_VERSION@
+Requires: @API_DEPS@
 Libs: -L${libdir} -lrapic
 Cflags: -I${includedir}
 
