@@ -73,6 +73,15 @@ the following will set the correct `PKG_CONFIG_PATH`:
 
     export PKG_CONFIG_PATH=${PKG_CONFIG_PATH}:${HOME}/local/lib/pkgconfig
 
+### C++ compatibility note
+The library is written in C++11.  It will not compile on compilers that lack
+support for this version of C++ or later.  _Depending on your compiler you may
+need to explicitly enable C++11 support by adding the `-std=c++11` flag._
+
+For example:
+
+    g++ -std=c++11 -o foo $(pkg-config --cflags --libs rapic) foo.cc
+
 ## Using the API
 Please consult the rapic.h header and the source of demo.cc for examples on how
 to use the API within your code.

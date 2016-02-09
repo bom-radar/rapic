@@ -15,7 +15,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *----------------------------------------------------------------------------*/
-#pragma once
+#ifndef RAPIC_H
+#define RAPIC_H
 
 #include <atomic>
 #include <bitset>
@@ -379,3 +380,4 @@ namespace rapic
       , std::function<void(char const*)> log_fn = [](char const*) { }
       ) -> time_t;
 }
+#endif
