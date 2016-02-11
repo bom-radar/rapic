@@ -466,7 +466,7 @@ auto rapic::write_odim_h5_volume(
     for (size_t r = 0; r < s->ray_headers().size(); ++r)
     {
       std::memcpy(
-            &ibuf[angle_to_index(*s, s->ray_headers()[r].azimuth()) * s->bins()]
+            &ibuf[angle_to_index(*s, s->ray_headers()[r].azimuth()) * bins]
           , &s->level_data()[r * s->bins()]
           , s->bins() * sizeof(uint8_t));
     }
