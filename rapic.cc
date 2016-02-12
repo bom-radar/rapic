@@ -726,17 +726,23 @@ auto client::process_traffic() -> bool
      *       write buffer here (extremely unlikely) then we will need to buffer writes like we do reads */
 
     // activate the semi-permanent connection
-    write(socket_, msg_connect.c_str(), msg_connect.size());
+    while (write(socket_, msg_connect.c_str(), msg_connect.size()) == -1)
+      if (errno != EINTR)
+        throw std::system_error{errno, std::system_category(), "rapic: failed to write to socket"};
 
     // activate each of our filters
     for (auto& filter : filters_)
-      write(socket_, filter.c_str(), filter.size());
+      while (write(socket_, filter.c_str(), filter.size()) == -1)
+        if (errno != EINTR)
+          throw std::system_error{errno, std::system_category(), "rapic: failed to write to socket"};
   }
 
   // do we need to send a keepalive? (ie: RDRSTAT)
   if (now - last_keepalive_ > keepalive_period_)
   {
-    write(socket_, msg_keepalive.c_str(), msg_keepalive.size());
+    while (write(socket_, msg_keepalive.c_str(), msg_keepalive.size()) == -1)
+      if (errno != EINTR)
+        throw std::system_error{errno, std::system_category(), "rapic: failed to write to socket"};
     last_keepalive_ = now;
   }
 
