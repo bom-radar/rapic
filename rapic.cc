@@ -42,10 +42,22 @@ static constexpr message_type no_message = static_cast<message_type>(-1);
 
 static const std::string msg_connect{"RPQUERY: SEMIPERMANENT CONNECTION - SEND ALL DATA TXCOMPLETESCANS=0\n"};
 static const std::string msg_keepalive{"RDRSTAT:\n"};
+
 static const std::string msg_mssg_head{"MSSG:"};
 static const std::string msg_mssg_term{"\n"};
+
 static const std::string msg_mssg30_head{"MSSG: 30"};
 static const std::string msg_mssg30_term{"END STATUS\n"};
+
+static const std::string msg_permcon_head{"RPQUERY: SEMIPERMANENT CONNECTION"};
+static const std::string msg_permcon_term{"\n"};
+
+static const std::string msg_query_head{"RPQUERY:"};
+static const std::string msg_query_term{"\n"};
+
+static const std::string msg_filter_head{"RPFILTER:"};
+static const std::string msg_filter_term{"\n"};
+
 static const std::string msg_scan_term{"END RADAR IMAGE"};
 
 // this table translates the ASCII encoding absolute, RLE digits and delta lookups
@@ -112,7 +124,7 @@ auto rapic::release_tag() -> char const*
   return RAPIC_RELEASE_TAG;
 }
 
-auto header::get_boolean() const -> bool
+auto scan::header::get_boolean() const -> bool
 {
   if (   strcasecmp(value_.c_str(), "true") == 0
       || strcasecmp(value_.c_str(), "on") == 0
@@ -129,17 +141,17 @@ auto header::get_boolean() const -> bool
   throw std::runtime_error{"bad boolean value"};
 }
 
-auto header::get_integer() const -> long
+auto scan::header::get_integer() const -> long
 {
   return std::stol(value_, nullptr, 10);
 }
 
-auto header::get_real() const -> double
+auto scan::header::get_real() const -> double
 {
   return std::stod(value_);
 }
 
-auto header::get_integer_array() const -> std::vector<long>
+auto scan::header::get_integer_array() const -> std::vector<long>
 {
   std::vector<long> ret;
   auto pos = value_.c_str();
@@ -166,7 +178,7 @@ auto header::get_integer_array() const -> std::vector<long>
   return ret;
 }
 
-auto header::get_real_array() const -> std::vector<double>
+auto scan::header::get_real_array() const -> std::vector<double>
 {
   std::vector<double> ret;
   auto pos = value_.c_str();
@@ -251,7 +263,7 @@ try
 
       // create the ray entry
       ray_headers_.emplace_back(angle);
-      
+
       // decode the data into levels
       auto out = &level_data_[bins_ * (ray_headers_.size() - 1)];
       int prev = 0;
@@ -367,7 +379,7 @@ try
       for (pos2 = pos + 1; pos2 < size; ++pos2)
         if (in[pos2] < ' ' || in[pos2] == ':')
           break;
-      
+
       // check for end of scan or corruption
       if (pos2 >= size || in[pos2] != ':')
       {
@@ -603,7 +615,7 @@ auto client::connect(std::string address, std::string service) -> void
   // TODO - loop through all addresses?
   if (addr->ai_next)
   {
-    
+
   }
 
   // create the socket
@@ -851,6 +863,36 @@ auto client::dequeue(message_type& type) -> bool
       }
     }
   }
+  // is it a SEMIPERMANENT CONNECTION message? (must check this before query due to header similarity)
+  else if (buffer_starts_with(msg_permcon_head))
+  {
+    if (buffer_find(msg_permcon_term, cur_size_))
+    {
+      cur_type_ = type = message_type::permcon;
+      cur_size_ += msg_permcon_term.size();
+      return true;
+    }
+  }
+  // is it a RPQUERY style message?
+  else if (buffer_starts_with(msg_query_head))
+  {
+    if (buffer_find(msg_query_term, cur_size_))
+    {
+      cur_type_ = type = message_type::query;
+      cur_size_ += msg_query_term.size();
+      return true;
+    }
+  }
+  // is it an RPFILTER styles message?
+  else if (buffer_starts_with(msg_filter_head))
+  {
+    if (buffer_find(msg_filter_term, cur_size_))
+    {
+      cur_type_ = type = message_type::filter;
+      cur_size_ += msg_filter_term.size();
+      return true;
+    }
+  }
   // otherwise assume it is a scan message and look for "END RADAR IMAGE"
   else
   {
@@ -865,7 +907,7 @@ auto client::dequeue(message_type& type) -> bool
   // if the buffer is full but we still cannot read a message then we are in overflow, fail hard
   if (wc - rcount_ == capacity_)
     throw std::runtime_error{"rapic: buffer overflow (try increasing buffer size)"};
-  
+
   return false;
 }
 

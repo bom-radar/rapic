@@ -96,8 +96,8 @@ static std::map<std::string, quantity> const video_map =
   , { "RHOHV",        { "RHOHV",    "RHOHV" }}
 };
 
-using odim_meta_fn = void (*)(header const&, meta_extra&);
-#define METAFN [](header const& h, meta_extra& m)
+using odim_meta_fn = void (*)(scan::header const&, meta_extra&);
+#define METAFN [](scan::header const& h, meta_extra& m)
 static std::map<std::string, odim_meta_fn> const header_map = 
 {
   // volume persistent metadata
@@ -356,7 +356,7 @@ auto rapic::write_odim_h5_volume(
       auto helev = s->find_header("ELEV");
 
       // look ahead and find the end of this tilt, also noting the maximum number of bins
-      header const* h = nullptr;
+      scan::header const* h = nullptr;
       end_tilt = s;
       bins = s->bins();
       while (end_tilt != scan_set.end())
@@ -429,7 +429,7 @@ auto rapic::write_odim_h5_volume(
         {
           // use start time from next scan if available
           auto n = s; ++n;
-          header const* h;
+          scan::header const* h;
           if (n != scan_set.end() && (h = n->find_header("TIMESTAMP")))
             hscan.set_end_date_time(rapic_timestamp_to_time_t(h->value().c_str()));
           else

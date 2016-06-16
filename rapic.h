@@ -36,8 +36,36 @@ namespace rapic
   /// Available message types
   enum class message_type
   {
-      mssg      ///< MSSG administration message
+      mssg      ///< administration message (MSSG)
+    , status    ///< status message (RDRSTAT)
+    , permcon   ///< semipermanent connection message (RPQUERY: SEMIPERMANENT CONNECTION)
+    , query     ///< data request message (RPQUERY)
+    , filter    ///< filter specification message (RPFILTER)
     , scan      ///< rapic scan message
+  };
+
+  /// Possible scan types for queries and filters
+  /* note: the numbers here are chosen to match Rowlf (since Rowlf sends numeric values instead of strings) */
+  enum class scan_type
+  {
+      any = -1
+    , ppi = 0
+    , rhi = 1
+    , comp_ppi = 2
+    , image = 3
+    , volume = 4
+    , rhi_set = 5
+    , merge = 6
+    , scan_error = 7
+  };
+
+  /// Possible query types, largely unused
+  enum class query_type
+  {
+      latest
+    , to_time
+    , from_time
+    , center_time
   };
 
   /// MSSG status message
@@ -46,76 +74,192 @@ namespace rapic
     std::string content;
   };
 
-  /// Header used by a scan message
-  class header
+  /// Semi-permanent connection message
+  class permcon
   {
   public:
-    header(std::string name, std::string value)
-      : name_(std::move(name)), value_(std::move(value))
-    { }
+    /// Construct an empty permanent connection message
+    permcon();
 
-    /// Get the name of the header
-    auto name() const -> std::string const&           { return name_; }
-    /// Set the name of the header
-    auto set_name(std::string const& name) -> void    { name_ = name; }
+    /// Reset the permanent connection message to an uninitialized state
+    auto reset() -> void;
 
-    /// Get the header value
-    auto value() const -> std::string const&          { return value_; }
-    /// Get the header value
-    auto set_value(std::string const& value) -> void  { value_ = value; }
+    /// Decode a permanent connection from the raw wire format
+    /** Returns number of bytes consumed from in buffer */
+    auto decode(uint8_t const* in, size_t size) -> size_t;
 
-    /// Get the header value as a bool
-    auto get_boolean() const -> bool;
-    /// Get the header value as a long
-    auto get_integer() const -> long;
-    /// Get the header value as a double
-    auto get_real() const -> double;
-    /// Get the header value as a vector of longs
-    auto get_integer_array() const -> std::vector<long>;
-    /// Get the header value as a vector of doubles
-    auto get_real_array() const -> std::vector<double>;
+    /// Get whether txcompletescans is set
+    auto tx_complete_scans() const -> bool                            { return tx_complete_scans_; }
 
   private:
-    std::string name_;
-    std::string value_;
+    bool                      tx_complete_scans_;
   };
 
-  /// Information about a single ray
-  class ray_header
+  /// RPQUERY message
+  class query
   {
   public:
-    ray_header()
-      : azimuth_{std::numeric_limits<float>::quiet_NaN()}
-      , elevation_{std::numeric_limits<float>::quiet_NaN()}
-      , time_offset_{-1}
-    { }
+    /// Construct an empty query
+    query();
 
-    ray_header(float azimuth)
-      : azimuth_{azimuth}, elevation_{std::numeric_limits<float>::quiet_NaN()}, time_offset_{-1}
-    { }
+    /// Reset the query to an uninitialized state
+    auto reset() -> void;
 
-    ray_header(float azimuth, float elevation, int time_offset)
-      : azimuth_{azimuth}, elevation_{elevation}, time_offset_{time_offset}
-    { }
+    /// Decode a query from the raw wire format
+    /** Returns number of bytes consumed from in buffer */
+    auto decode(uint8_t const* in, size_t size) -> size_t;
 
-    /// Get the azimuth at the center of this ray (degrees)
-    auto azimuth() const -> float   { return azimuth_; }
+    /// Get the station identifier (0 = any)
+    auto station_id() const -> int                                    { return station_id_; }
 
-    /// Get the elevation at the center of this ray (degrees)
-    auto elevation() const -> float { return elevation_; }
+    /// Get the scan type
+    auto scan_type() const -> rapic::scan_type                        { return scan_type_; }
 
-    /// Get the time offset from the start of scan to this ray (seconds)
-    auto time_offset() const -> int { return time_offset_; }
+    /// Get the volume id (-1 = any or not volume)
+    auto volume_id() const -> int                                     { return volume_id_; }
+
+    /// Get the selected angle (-1 = default)
+    auto angle() const -> float                                       { return angle_; }
+
+    /// Get the repeat count (-1 = default)
+    auto repeat_count() const -> int                                  { return repeat_count_; }
+
+    /// Get the query type (latest by default)
+    auto query_type() const -> rapic::query_type                      { return query_type_; }
+
+    /// Get the image time (0 = latest image)
+    auto time() const -> time_t                                       { return time_; }
+
+    /// Get the data types
+    auto data_types() const -> std::vector<std::string> const&        { return data_types_; }
+
+    /// Get the video resolution
+    auto video_resolution() const -> int                              { return video_res_; }
 
   private:
-    float azimuth_;
-    float elevation_;
-    int   time_offset_;
+    int                       station_id_;
+    rapic::scan_type          scan_type_;
+    int                       volume_id_;
+    float                     angle_;
+    int                       repeat_count_;
+    rapic::query_type         query_type_;
+    time_t                    time_;
+    std::vector<std::string>  data_types_;
+    int                       video_res_;
+  };
+
+  /// RPFILTER message
+  class filter
+  {
+  public:
+    /// Construct an empty query
+    filter();
+
+    /// Reset the filter to an uninitialized state
+    auto reset() -> void;
+
+    /// Decode a filter from the raw wire format
+    /** Returns number of bytes consumed from in buffer */
+    auto decode(uint8_t const* in, size_t size) -> size_t;
+
+    /// Get the station identifier
+    auto station_id() const -> int                                    { return station_id_; }
+
+    /// Get the scan type
+    auto scan_type() const -> rapic::scan_type                        { return scan_type_; }
+
+    /// Get the volume id (-1 = any or not volume)
+    auto volume_id() const -> int                                     { return volume_id_; }
+
+    /// Get the video resolution
+    auto video_resolution() const -> int                              { return video_res_; }
+
+    /// Get the source identifier (-1 = default)
+    auto source() const -> std::string const&                         { return source_; }
+
+    /// Get the data types
+    auto data_types() const -> std::vector<std::string> const&        { return data_types_; }
+
+  private:
+    int                       station_id_;
+    rapic::scan_type          scan_type_;
+    int                       volume_id_;
+    int                       video_res_;
+    std::string               source_;
+    std::vector<std::string>  data_types_;
   };
 
   /// Radar product message
   class scan
   {
+  public:
+    /// Header used by a scan message
+    class header
+    {
+    public:
+      header(std::string name, std::string value)
+        : name_(std::move(name)), value_(std::move(value))
+      { }
+
+      /// Get the name of the header
+      auto name() const -> std::string const&           { return name_; }
+      /// Set the name of the header
+      auto set_name(std::string const& name) -> void    { name_ = name; }
+
+      /// Get the header value
+      auto value() const -> std::string const&          { return value_; }
+      /// Get the header value
+      auto set_value(std::string const& value) -> void  { value_ = value; }
+
+      /// Get the header value as a bool
+      auto get_boolean() const -> bool;
+      /// Get the header value as a long
+      auto get_integer() const -> long;
+      /// Get the header value as a double
+      auto get_real() const -> double;
+      /// Get the header value as a vector of longs
+      auto get_integer_array() const -> std::vector<long>;
+      /// Get the header value as a vector of doubles
+      auto get_real_array() const -> std::vector<double>;
+
+    private:
+      std::string name_;
+      std::string value_;
+    };
+
+    /// Information about a single ray
+    class ray_header
+    {
+    public:
+      ray_header()
+        : azimuth_{std::numeric_limits<float>::quiet_NaN()}
+        , elevation_{std::numeric_limits<float>::quiet_NaN()}
+        , time_offset_{-1}
+      { }
+
+      ray_header(float azimuth)
+        : azimuth_{azimuth}, elevation_{std::numeric_limits<float>::quiet_NaN()}, time_offset_{-1}
+      { }
+
+      ray_header(float azimuth, float elevation, int time_offset)
+        : azimuth_{azimuth}, elevation_{elevation}, time_offset_{time_offset}
+      { }
+
+      /// Get the azimuth at the center of this ray (degrees)
+      auto azimuth() const -> float   { return azimuth_; }
+
+      /// Get the elevation at the center of this ray (degrees)
+      auto elevation() const -> float { return elevation_; }
+
+      /// Get the time offset from the start of scan to this ray (seconds)
+      auto time_offset() const -> int { return time_offset_; }
+
+    private:
+      float azimuth_;
+      float elevation_;
+      int   time_offset_;
+    };
+
   public:
     /// Construct an empty scan
     scan();
@@ -222,12 +366,12 @@ namespace rapic
    *    // wait for data to arrive
    *    while (con.connected()) {
    *      con.poll();
-   *    
+   *
    *      // process messages from server
    *      bool again = true;
    *      while (again) {
    *        again = con.process_traffic();
-   *    
+   *
    *        // dequeue each message
    *        message_type type;
    *        while (con.dequeue(type)) {
@@ -332,6 +476,9 @@ namespace rapic
      *  most recent call to dequeue) then a runtime exception will be thrown. */
     auto decode(mssg& msg) -> void;
     auto decode(scan& msg) -> void;
+    auto decode(permcon& msg) -> void;
+    auto decode(query& msg) -> void;
+    auto decode(filter& msg) -> void;
 
   private:
     using filter_store = std::vector<std::string>;
