@@ -47,7 +47,10 @@ static const std::string msg_mssg_head{"MSSG:"};
 static const std::string msg_mssg_term{"\n"};
 
 static const std::string msg_mssg30_head{"MSSG: 30"};
-static const std::string msg_mssg30_term{"END STATUS\n"};
+static const std::string msg_mssg30_term{"\nEND STATUS\n"};
+
+static const std::string msg_status_head{"RDRSTAT:"};
+static const std::string msg_status_term{"\n"};
 
 static const std::string msg_permcon_head{"RPQUERY: SEMIPERMANENT CONNECTION"};
 static const std::string msg_permcon_term{"\n"};
@@ -119,9 +122,428 @@ constexpr lookup_value lookup[] =
   lval(152),  lval(153),   lval(154),   lval(155),   lval(156),   lval(157),   lval(158),   lval(159)    // f8-ff
 };
 
+// find the next text within a line, or the end of line
+static auto find_text(uint8_t const* in, size_t size, size_t& pos) -> size_t
+{
+  for (size_t i = pos; i < size; ++i)
+  {
+    if (in[i] == '\0' || in[i] == '\n')
+      return i;
+    if (!std::isspace(in[i]))
+      return i;
+  }
+  throw std::runtime_error{"unterminated message"};
+}
+
+// find the next whitespace within a line, or the end of line
+static auto find_white(uint8_t const* in, size_t size, size_t& pos) -> size_t
+{
+  for (size_t i = pos; i < size; ++i)
+  {
+    if (in[i] == '\0' || in[i] == '\n')
+      return i;
+    if (std::isspace(in[i]))
+      return i;
+  }
+  throw std::runtime_error{"unterminated message"};
+}
+
+// find the end of the line
+static auto find_eol(uint8_t const* in, size_t size, size_t pos) -> size_t
+{
+  for (size_t i = pos; i < size; ++i)
+    if (in[i] == '\0' || in[i] == '\n')
+      return i;
+  throw std::runtime_error{"unterminated message"};
+}
+
+static auto parse_station_id(char const* in) -> int
+{
+  int ret = strcasecmp(in, "ANY") == 0 ? 0 : atoi(in);
+  if (ret == 0 && in[0] != '0')
+    throw std::runtime_error{"invalid station id"};
+  return ret;
+}
+
+static auto parse_scan_type(char const* in) -> std::pair<scan_type, int>
+{
+  // is it a numeric equivalent (must match ROWLF definitions - see scantype.cc)
+  if (std::isdigit(in[0]))
+  {
+    int val = std::atoi(in);
+    if (val < -1 || val > 7 || (val == 0 && in[0] != '0'))
+      throw std::runtime_error{"invalid scan type"};
+    return { static_cast<scan_type>(val), -1 };
+  }
+
+  // is it a plain type identifier string?
+  if (strcasecmp(in, "ANY") == 0)
+    return { scan_type::any, -1 };
+  if (strcasecmp(in, "PPI") == 0)
+    return { scan_type::ppi, -1 };
+  if (strcasecmp(in, "RHI") == 0)
+    return { scan_type::rhi, -1 };
+  if (strcasecmp(in, "CompPPI") == 0)
+    return { scan_type::comp_ppi, -1 };
+  if (strcasecmp(in, "IMAGE") == 0)
+    return { scan_type::image, -1 };
+  if (strcasecmp(in, "VOL") == 0)
+    return { scan_type::volume, -1 };
+  if (strcasecmp(in, "VOLUME") == 0)
+    return { scan_type::volume, -1 };
+  if (strcasecmp(in, "RHI_SET") == 0)
+    return { scan_type::rhi_set, -1 };
+  if (strcasecmp(in, "MERGE") == 0)
+    return { scan_type::merge, -1 };
+  if (strcasecmp(in, "SCAN_ERROR") == 0)
+    return { scan_type::scan_error, -1 };
+
+  // is it a VOLUMEXX identifier?
+  int volid;
+  if (sscanf(in, "VOLUME%d", &volid) == 1)
+    return { scan_type::volume, volid };
+  if (sscanf(in, "COMPPPI%d", &volid) == 1)
+    return { scan_type::comp_ppi, volid };
+
+  throw std::runtime_error{"invalid scan type id"};
+}
+
+auto parse_query_type(char const* in) -> query_type
+{
+  if (strcasecmp(in, "LATEST") == 0)
+    return query_type::latest;
+  if (strcasecmp(in, "TOTIME") == 0)
+    return query_type::to_time;
+  if (strcasecmp(in, "FROMTIME") == 0)
+    return query_type::from_time;
+  if (strcasecmp(in, "CENTRETIME") == 0)
+    return query_type::center_time;
+
+  throw std::runtime_error{"invalid query type"};
+}
+
+auto parse_data_types(char const* in) -> std::vector<std::string>
+{
+  std::vector<std::string> ret;
+  size_t pos = 0, end = 0;
+  while (in[end] != '\0')
+  {
+    if (in[end] == ',' || in[end] == '\0')
+    {
+      if (end - pos > 0)
+        ret.emplace_back(in + pos, end - pos);
+
+      if (in[end] == '\0')
+        break;
+
+      pos = end + 1;
+    }
+    ++end;
+  }
+
+  return ret;
+}
+
 auto rapic::release_tag() -> char const*
 {
   return RAPIC_RELEASE_TAG;
+}
+
+decode_error::decode_error(message_type type, uint8_t const* in, size_t size)
+  : std::runtime_error{"TODO"}
+{
+}
+
+message::~message()
+{ }
+
+mssg::mssg()
+{
+  reset();
+}
+
+auto mssg::type() const -> message_type
+{
+  return message_type::mssg;
+}
+
+auto mssg::reset() -> void
+{
+  number_ = -1;
+  text_.clear();
+}
+
+auto mssg::encode(uint8_t* out, size_t size) const -> size_t
+{
+  // TODO
+  return 0;
+}
+
+auto mssg::decode(uint8_t const* in, size_t size) -> size_t
+try
+{
+  size_t pos = 0, end = 0;
+
+  // read the message identifier and number
+  if (sscanf(reinterpret_cast<char const*>(in), "MSSG: %d%zn", &number_, &pos) != 1 || pos == 0)
+    throw std::runtime_error{"failed to parse message header"};
+
+  // remainder of line is the message text
+  pos = find_text(in, size, pos);
+  end = find_eol(in, size, pos);
+  text_.assign(reinterpret_cast<char const*>(in + pos), end - pos);
+
+  // handle multi-line messages (only #30)
+  if (number_ == 30)
+  {
+    while (true)
+    {
+      pos = end + 1;
+      end = find_eol(in, size, pos);
+      if (strncmp("END STATUS", reinterpret_cast<char const*>(in + pos), end - pos) == 0)
+        break;
+      text_.push_back('\n');
+      text_.append(reinterpret_cast<char const*>(in + pos), end - pos);
+    }
+  }
+
+  return end + 1;
+}
+catch (...)
+{
+  std::throw_with_nested(decode_error{message_type::mssg, in, size});
+}
+
+status::status()
+{
+  reset();
+}
+
+auto status::type() const -> message_type
+{
+  return message_type::status;
+}
+
+auto status::reset() -> void
+{
+  text_.clear();
+}
+
+auto status::encode(uint8_t* out, size_t size) const -> size_t
+{
+  // TODO
+  return 0;
+}
+
+auto status::decode(uint8_t const* in, size_t size) -> size_t
+try
+{
+  size_t pos = 0, end = 0;
+
+  // read the header
+  if (sscanf(reinterpret_cast<char const*>(in), "RDRSTAT:%zn", &pos) != 0 || pos == 0)
+    throw std::runtime_error{"failed to parse message header"};
+
+  // remainder of line is the message text
+  pos = find_text(in, size, pos);
+  end = find_eol(in, size, pos);
+  text_.assign(reinterpret_cast<char const*>(in + pos), end - pos);
+
+  return end + 1;
+}
+catch (...)
+{
+  std::throw_with_nested(decode_error{message_type::status, in, size});
+}
+
+permcon::permcon()
+{
+  reset();
+}
+
+auto permcon::type() const -> message_type
+{
+  return message_type::permcon;
+}
+
+auto permcon::reset() -> void
+{
+  tx_complete_scans_ = false;
+}
+
+auto permcon::encode(uint8_t* out, size_t size) const -> size_t
+{
+  // TODO
+  return 0;
+}
+
+auto permcon::decode(uint8_t const* in, size_t size) -> size_t
+try
+{
+  size_t pos = 0, end = 0;
+
+  // read the header
+  if (sscanf(reinterpret_cast<char const*>(in), "RPQUERY: SEMIPERMANENT CONNECTION - SEND ALL DATA%zn", &pos) != 0 || pos == 0)
+    throw std::runtime_error{"failed to parse message header"};
+
+  // process any flags on the end of line
+  while (true)
+  {
+    // extract the next token
+    pos = find_text(in, size, pos);
+    end = find_white(in, size, pos);
+    if (in[pos] == '\0' || in[pos] == '\n')
+      break;
+
+    // we currently only support the TXCOMPLETESCANS flag...
+    int val;
+    if (sscanf(reinterpret_cast<char const*>(in + pos), "TXCOMPLETESCANS=%d", &val) == 1)
+    {
+      tx_complete_scans_ = val != 0;
+    }
+    else
+    {
+      // other flags are currently ignored - should trace them though
+    }
+  }
+
+  return end + 1;
+}
+catch (...)
+{
+  std::throw_with_nested(decode_error{message_type::status, in, size});
+}
+
+query::query()
+{
+  reset();
+}
+
+auto query::type() const -> message_type
+{
+  return message_type::query;
+}
+
+auto query::reset() -> void
+{
+  station_id_ = 0;
+  scan_type_ = rapic::scan_type::any;
+  volume_id_ = -1;
+  angle_ = -1.0f;
+  repeat_count_ = -1;
+  query_type_ = rapic::query_type::latest;
+  time_ = 0;
+  data_types_.clear();
+  video_res_ = -1;
+}
+
+auto query::encode(uint8_t* out, size_t size) const -> size_t
+{
+  // TODO
+  return 0;
+}
+
+auto query::decode(uint8_t const* in, size_t size) -> size_t
+try
+{
+  long time;
+  char str_stn[21], str_stype[21], str_qtype[21], str_dtype[128];
+  size_t pos = 0, end = 0;
+
+  // read the header
+  auto ret = sscanf(
+        reinterpret_cast<char const*>(in)
+      , "RPQUERY: %20s %20s %f %d %20s %ld %127s %d%zn"
+      , str_stn
+      , str_stype
+      , &angle_
+      , &repeat_count_
+      , str_qtype
+      , &time
+      , str_dtype
+      , &video_res_
+      , &pos);
+  if (ret != 7)
+    throw std::runtime_error{"corrupt message detected"};
+
+  // check/parse the individual tokens
+  station_id_ = parse_station_id(str_stn);
+  std::tie(scan_type_, volume_id_) = parse_scan_type(str_stype);
+  query_type_ = parse_query_type(str_qtype);
+  time_ = time;
+  data_types_ = parse_data_types(str_dtype);
+
+  // find the end of the line
+  end = find_eol(in, size, pos);
+
+  return end + 1;
+}
+catch (...)
+{
+  std::throw_with_nested(decode_error{message_type::status, in, size});
+}
+
+filter::filter()
+{
+  reset();
+}
+
+auto filter::type() const -> message_type
+{
+  return message_type::filter;
+}
+
+auto filter::reset() -> void
+{
+  station_id_ = -1;
+  scan_type_ = rapic::scan_type::any;
+  volume_id_ = -1;
+  video_res_ = -1;
+  source_.clear();
+  data_types_.clear();
+}
+
+auto filter::encode(uint8_t* out, size_t size) const -> size_t
+{
+  // TODO
+  return 0;
+}
+
+auto filter::decode(uint8_t const* in, size_t size) -> size_t
+try
+{
+  char str_stn[21], str_stype[21], str_src[21], str_dtype[128];
+  size_t pos = 0, end = 0;
+
+  str_src[0] = '\0';
+
+  // read the header
+  auto ret = sscanf(
+        reinterpret_cast<char const*>(in)
+      , "RPFILTER:%20[^:]:%20[^:]:%d:%20[^:]:%127s%zn"
+      , str_stn
+      , str_stype
+      , &video_res_
+      , str_src
+      , str_dtype
+      , &pos);
+  if (ret != 5)
+    throw std::runtime_error{"corrupt message detected"};
+
+  // check/parse the individual tokens
+  station_id_ = parse_station_id(str_stn);
+  std::tie(scan_type_, volume_id_) = parse_scan_type(str_stype);
+  source_.assign(str_src);
+  data_types_ = parse_data_types(str_dtype);
+
+  // find the end of the line
+  end = find_eol(in, size, pos);
+
+  return end + 1;
+}
+catch (...)
+{
+  std::throw_with_nested(decode_error{message_type::status, in, size});
 }
 
 auto scan::header::get_boolean() const -> bool
@@ -210,6 +632,11 @@ scan::scan()
   reset();
 }
 
+auto scan::type() const -> message_type
+{
+  return message_type::scan;
+}
+
 auto scan::reset() -> void
 {
   headers_.clear();
@@ -227,6 +654,12 @@ auto scan::reset() -> void
   angle_min_ = fnan;
   angle_max_ = fnan;
   angle_resolution_ = fnan;
+}
+
+auto scan::encode(uint8_t* out, size_t size) const -> size_t
+{
+  // TODO
+  return 0;
 }
 
 auto scan::decode(uint8_t const* in, size_t size) -> size_t
@@ -816,6 +1249,10 @@ auto client::service() const -> std::string const&
   return service_;
 }
 
+auto client::enqueue(message& msg) -> void
+{
+}
+
 auto client::dequeue(message_type& type) -> bool
 {
   // move along to the next packet in the buffer if needed
@@ -863,7 +1300,17 @@ auto client::dequeue(message_type& type) -> bool
       }
     }
   }
-  // is it a SEMIPERMANENT CONNECTION message? (must check this before query due to header similarity)
+  // is it an RDRSTAT message?
+  else if (buffer_starts_with(msg_status_head))
+  {
+    if (buffer_find(msg_status_term, cur_size_))
+    {
+      cur_type_ = type = message_type::status;
+      cur_size_ += msg_permcon_term.size();
+      return true;
+    }
+  }
+  // is it a SEMIPERMANENT CONNECTION message? (must check this before RPQUERY due to header similarity)
   else if (buffer_starts_with(msg_permcon_head))
   {
     if (buffer_find(msg_permcon_term, cur_size_))
@@ -911,29 +1358,18 @@ auto client::dequeue(message_type& type) -> bool
   return false;
 }
 
-auto client::decode(mssg& msg) -> void
+auto client::decode(message& msg) -> void
 {
-  check_cur_type(message_type::mssg);
-
-  msg.content.reserve(cur_size_);
+  // sanity check the passed message type
+  if (cur_type_ != msg.type())
+  {
+    if (cur_type_ == no_message)
+      throw std::runtime_error{"rapic: no message dequeued for decoding"};
+    else
+      throw std::runtime_error{"rapic: incorrect type passed for decoding"};
+  }
 
   // if the message spans the buffer wrap around point, copy it into a temporary location to ease parsing
-  auto pos = rcount_ % capacity_;
-  if (pos + cur_size_ > capacity_)
-  {
-    msg.content.assign(reinterpret_cast<char const*>(&buffer_[pos]), capacity_ - pos);
-    msg.content.append(reinterpret_cast<char const*>(&buffer_[0]), cur_size_ - (capacity_ - pos));
-  }
-  else
-  {
-    msg.content.assign(reinterpret_cast<char const*>(&buffer_[pos]), cur_size_);
-  }
-}
-
-auto client::decode(scan& msg) -> void
-{
-  check_cur_type(message_type::scan);
-
   auto pos = rcount_ % capacity_;
   if (pos + cur_size_ > capacity_)
   {
@@ -944,17 +1380,6 @@ auto client::decode(scan& msg) -> void
   }
   else
     msg.decode(&buffer_[pos], cur_size_);
-}
-
-auto client::check_cur_type(message_type type) -> void
-{
-  if (cur_type_ != type)
-  {
-    if (cur_type_ == no_message)
-      throw std::runtime_error{"rapic: no message dequeued for decoding"};
-    else
-      throw std::runtime_error{"rapic: incorrect type passed for decoding"};
-  }
 }
 
 auto client::buffer_starts_with(std::string const& str) const -> bool

@@ -68,46 +68,113 @@ namespace rapic
     , center_time
   };
 
-  /// MSSG status message
-  struct mssg
+  /// Error thrown upon failure to decode the rapic message stream
+  class decode_error : public std::runtime_error
   {
-    std::string content;
+  public:
+    decode_error(char const* desc, uint8_t const* in, size_t size);
+    decode_error(message_type type, uint8_t const* in, size_t size);
+  };
+
+  /// Abstract base class for message types
+  class message
+  {
+  public:
+    virtual ~message();
+
+    /// Get the type of this message
+    virtual auto type() const -> message_type = 0;
+
+    /// Reset the message to a default state
+    virtual auto reset() -> void = 0;
+
+    /// Encode the message into the wire format
+    /** Returns the number of bytes written to the buffer */
+    virtual auto encode(uint8_t* out, size_t size) const -> size_t = 0;
+
+    /// Decode the message from the wire format
+    virtual auto decode(uint8_t const* in, size_t size) -> size_t = 0;
+  };
+
+  /// MSSG status message
+  class mssg : public message
+  {
+  public:
+    /// Construct an empty status message
+    mssg();
+
+    auto type() const -> message_type override;
+    auto reset() -> void override;
+    auto encode(uint8_t* out, size_t size) const -> size_t override;
+    auto decode(uint8_t const* in, size_t size) -> size_t override;
+
+    /// Get the message number
+    auto number() const -> int                                        { return number_; }
+    /// Set the message number
+    auto set_number(int val) -> void                                  { number_ = val; }
+
+    /// Get the message string
+    auto text() const -> std::string const&                           { return text_; }
+    /// Set the message string
+    auto set_text(std::string const& val) -> void                     { text_ = val; }
+
+  private:
+    int         number_;
+    std::string text_;
+  };
+
+  /// RDRSTAT status message
+  /** This message is used as a keepalive for rapic protocol connections.  It contains no actual useful data. */
+  class status : public message
+  {
+  public:
+    /// Construct an empty status message
+    status();
+
+    auto type() const -> message_type override;
+    auto reset() -> void override;
+    auto encode(uint8_t* out, size_t size) const -> size_t override;
+    auto decode(uint8_t const* in, size_t size) -> size_t override;
+
+    /// Get the message string
+    auto text() const -> std::string const&                           { return text_; }
+    /// Set the message string
+    auto set_text(std::string const& val) -> void                     { text_ = val; }
+
+  private:
+    std::string text_;
   };
 
   /// Semi-permanent connection message
-  class permcon
+  class permcon : public message
   {
   public:
     /// Construct an empty permanent connection message
     permcon();
 
-    /// Reset the permanent connection message to an uninitialized state
-    auto reset() -> void;
-
-    /// Decode a permanent connection from the raw wire format
-    /** Returns number of bytes consumed from in buffer */
-    auto decode(uint8_t const* in, size_t size) -> size_t;
+    auto type() const -> message_type override;
+    auto reset() -> void override;
+    auto encode(uint8_t* out, size_t size) const -> size_t override;
+    auto decode(uint8_t const* in, size_t size) -> size_t override;
 
     /// Get whether txcompletescans is set
     auto tx_complete_scans() const -> bool                            { return tx_complete_scans_; }
 
   private:
-    bool                      tx_complete_scans_;
+    bool tx_complete_scans_;
   };
 
   /// RPQUERY message
-  class query
+  class query : public message
   {
   public:
     /// Construct an empty query
     query();
 
-    /// Reset the query to an uninitialized state
-    auto reset() -> void;
-
-    /// Decode a query from the raw wire format
-    /** Returns number of bytes consumed from in buffer */
-    auto decode(uint8_t const* in, size_t size) -> size_t;
+    auto type() const -> message_type override;
+    auto reset() -> void override;
+    auto encode(uint8_t* out, size_t size) const -> size_t override;
+    auto decode(uint8_t const* in, size_t size) -> size_t override;
 
     /// Get the station identifier (0 = any)
     auto station_id() const -> int                                    { return station_id_; }
@@ -149,18 +216,16 @@ namespace rapic
   };
 
   /// RPFILTER message
-  class filter
+  class filter : public message
   {
   public:
     /// Construct an empty query
     filter();
 
-    /// Reset the filter to an uninitialized state
-    auto reset() -> void;
-
-    /// Decode a filter from the raw wire format
-    /** Returns number of bytes consumed from in buffer */
-    auto decode(uint8_t const* in, size_t size) -> size_t;
+    auto type() const -> message_type override;
+    auto reset() -> void override;
+    auto encode(uint8_t* out, size_t size) const -> size_t override;
+    auto decode(uint8_t const* in, size_t size) -> size_t override;
 
     /// Get the station identifier
     auto station_id() const -> int                                    { return station_id_; }
@@ -190,7 +255,7 @@ namespace rapic
   };
 
   /// Radar product message
-  class scan
+  class scan : public message
   {
   public:
     /// Header used by a scan message
@@ -264,12 +329,10 @@ namespace rapic
     /// Construct an empty scan
     scan();
 
-    /// Reset the scan to an uninitialized state
-    auto reset() -> void;
-
-    /// Decode a scan from the raw wire format
-    /** Returns number of bytes consumed from in buffer */
-    auto decode(uint8_t const* in, size_t size) -> size_t;
+    auto type() const -> message_type override;
+    auto reset() -> void override;
+    auto encode(uint8_t* out, size_t size) const -> size_t override;
+    auto decode(uint8_t const* in, size_t size) -> size_t override;
 
     /// Get the station identifier
     auto station_id() const -> int                                    { return station_id_; }
@@ -352,7 +415,7 @@ namespace rapic
     float       angle_resolution_;
   };
 
-  /// Rapic Data Server client connection manager
+  /// Rapic protocol connection manager
   /** This class is implemented with the expectation that it may be used in an environment where asynchronous I/O
    *  is desired.  As such, the most basic use of this class requires calling separate functions for checking
    *  data availability on the connection, processing connection traffic, dequeuing and decoding messages.
@@ -363,19 +426,17 @@ namespace rapic
    *    client con;
    *    con.connect("myhost", "1234");
    *
-   *    // wait for data to arrive
+   *    // keep processing while the connection is open
    *    while (con.connected()) {
+   *      // wait for data to arrive
    *      con.poll();
    *
-   *      // process messages from server
-   *      bool again = true;
-   *      while (again) {
-   *        again = con.process_traffic();
-   *
-   *        // dequeue each message
+   *      // process data received from remote host
+   *      while (con.proces_traffic()) {
+   *        // dequeue each completed message
    *        message_type type;
    *        while (con.dequeue(type)) {
-   *          // decode and handle interesting messages
+   *          // decode and handle the message types we care about
    *          if (type == message_type::scan) {
    *            scan msg;
    *            con.decode(msg);
@@ -464,6 +525,9 @@ namespace rapic
     /// Get the service or port name for the connection
     auto service() const -> std::string const&;
 
+    /// Encode and send a message to the remote server
+    auto enqueue(message& msg) -> void;
+
     /// Dequeue the next available message and return its type
     /** If no message is available, the function returns false.
      *  Each time dequeue is called the stream position is advanced to the next message regardless of whether
@@ -474,18 +538,13 @@ namespace rapic
     /// Decode the current message into the relevant message structure
     /** If the type of the message argument passed does not match the currently active message (as returned by the
      *  most recent call to dequeue) then a runtime exception will be thrown. */
-    auto decode(mssg& msg) -> void;
-    auto decode(scan& msg) -> void;
-    auto decode(permcon& msg) -> void;
-    auto decode(query& msg) -> void;
-    auto decode(filter& msg) -> void;
+    auto decode(message& msg) -> void;
 
   private:
     using filter_store = std::vector<std::string>;
     using buffer = std::unique_ptr<uint8_t[]>;
 
   private:
-    auto check_cur_type(message_type type) -> void;
     auto buffer_ignore_whitespace() -> void;
     auto buffer_starts_with(std::string const& str) const -> bool;
     auto buffer_find(std::string const& str, size_t& pos) const -> bool;

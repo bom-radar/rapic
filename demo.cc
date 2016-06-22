@@ -36,7 +36,40 @@ auto handle_rapic_messages(rapic::client& con) -> void
       {
         rapic::mssg msg;
         con.decode(msg);
-        std::cout << msg.content << std::endl;
+        std::cout << "MESSAGE: "
+          << " number " << msg.number()
+          << " text " << msg.text()
+          << std::endl;
+      }
+      break;
+    case rapic::message_type::status:
+      {
+        rapic::status msg;
+        con.decode(msg);
+        std::cout << "STATUS: " << std::endl;
+      }
+      break;
+    case rapic::message_type::permcon:
+      {
+        rapic::permcon msg;
+        con.decode(msg);
+        std::cout << "PERMCON: "
+          << " txcomplete " << (msg.tx_complete_scans() ? "true" : "false")
+          << std::endl;
+      }
+      break;
+    case rapic::message_type::query:
+      {
+        rapic::query msg;
+        con.decode(msg);
+        std::cout << "QUERY: " << std::endl;
+      }
+      break;
+    case rapic::message_type::filter:
+      {
+        rapic::filter msg;
+        con.decode(msg);
+        std::cout << "FILTER: " << std::endl;
       }
       break;
     case rapic::message_type::scan:
