@@ -162,7 +162,7 @@ static std::map<std::string, odim_meta_fn> const header_map =
   , { "NYQUIST",      METAFN
       {
         auto val = h.get_real();
-        if (isnan(m.maxvel))
+        if (std::isnan(m.maxvel))
           m.maxvel = val;
         m.t.attributes()["NI"].set(val);
       }
@@ -476,7 +476,7 @@ auto rapic::write_odim_h5_volume(
     if (!m.thresholds.empty())
     {
       // check that we know how to repack this moment
-      if (vm == video_map.end() || isnan(vm->second.odim_gain))
+      if (vm == video_map.end() || std::isnan(vm->second.odim_gain))
         throw std::runtime_error{std::string("thresholded encoding used for unexpected video type: ") + m.video};
 
       // determine the matching output level for each threshold and
@@ -531,7 +531,7 @@ auto rapic::write_odim_h5_volume(
     // velocity moment with nyquist or VELLVL supplied?
     else if (m.video == "Vel")
     {
-      if (isnan(m.maxvel))
+      if (std::isnan(m.maxvel))
         throw std::runtime_error{"no VELLVL or NYQUIST supplied for default Vel encoded scan"};
 
       // this logic is copied from ConcEncodeClient.cpp (via Ray)
