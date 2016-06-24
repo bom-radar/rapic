@@ -249,6 +249,26 @@ auto rapic::release_tag() -> char const*
   return RAPIC_RELEASE_TAG;
 }
 
+socket_handle::~socket_handle()
+{
+  if (fd_ != -1)
+    close(fd_);
+}
+
+auto socket_handle::reset(int fd) -> void
+{
+  if (fd_ != -1)
+    close(fd_);
+  fd_ = fd;
+}
+
+auto socket_handle::release() -> int
+{
+  int ret = fd_;
+  fd_ = -1;
+  return ret;
+}
+
 decode_error::decode_error(message_type type, uint8_t const* in, size_t size)
   : std::runtime_error{"TODO"}
 {
@@ -380,32 +400,20 @@ auto permcon::encode(uint8_t* out, size_t size) const -> size_t
 auto permcon::decode(uint8_t const* in, size_t size) -> size_t
 try
 {
+  int ival;
   size_t pos = 0, end = 0;
 
   // read the header
-  if (sscanf(reinterpret_cast<char const*>(in), "RPQUERY: SEMIPERMANENT CONNECTION - SEND ALL DATA%zn", &pos) != 0 || pos == 0)
+  auto ret = sscanf(
+        reinterpret_cast<char const*>(in)
+      , "RPQUERY: SEMIPERMANENT CONNECTION - SEND ALL DATA TXCOMPLETESCANS=%d%zn"
+      , &ival
+      , &pos);
+  if (ret != 1)
     throw std::runtime_error{"failed to parse message header"};
 
-  // process any flags on the end of line
-  while (true)
-  {
-    // extract the next token
-    pos = find_text(in, size, pos);
-    end = find_white(in, size, pos);
-    if (in[pos] == '\0' || in[pos] == '\n')
-      break;
-
-    // we currently only support the TXCOMPLETESCANS flag...
-    int val;
-    if (sscanf(reinterpret_cast<char const*>(in + pos), "TXCOMPLETESCANS=%d", &val) == 1)
-    {
-      tx_complete_scans_ = val != 0;
-    }
-    else
-    {
-      // other flags are currently ignored - should trace them though
-    }
-  }
+  // find the end of the line
+  end = find_eol(in, size, pos);
 
   return end + 1;
 }
@@ -946,66 +954,162 @@ auto scan::initialize_rays() -> void
   level_data_.resize(rays_ * bins_);
 }
 
-client::client(size_t buffer_size, time_t keepalive_period)
-  : keepalive_period_{keepalive_period}
-  , socket_{-1}
-  , establish_wait_{false}
-  , last_keepalive_{0}
-  , buffer_{new uint8_t[buffer_size]}
-  , capacity_{buffer_size}
+client::buffer::buffer(size_t capacity)
+  : capacity_{capacity}
+  , data_{new uint8_t[capacity_]}
   , wcount_{0}
   , rcount_{0}
+{ }
+
+client::buffer::buffer(buffer&& rhs) noexcept
+  : capacity_{rhs.capacity_}
+  , data_{std::move(rhs.data_)}
+  , wcount_{static_cast<unsigned int>(rhs.wcount_)}
+  , rcount_{static_cast<unsigned int>(rhs.rcount_)}
+{ }
+
+inline auto client::buffer::clear() -> void
+{
+  wcount_ = 0;
+  rcount_ = 0;
+}
+
+inline auto client::buffer::full() const -> bool
+{
+  return wcount_ - rcount_ == capacity_;
+}
+
+inline auto client::buffer::write_acquire() -> std::pair<uint8_t*, size_t>
+{
+  unsigned int rc = rcount_;
+  unsigned int wc = wcount_;
+
+  // is the buffer full?
+  if (wc - rc >= capacity_)
+    return { nullptr, 0 };
+
+  // determine current read and write positions
+  auto rpos = rc % capacity_;
+  auto wpos = wc % capacity_;
+
+  // see how much _contiguous_ space is left in our buffer (may be less than total available write space)
+  // this does not distinguish between full and empty, hence the explicit check above
+  return { &data_[wpos], wpos < rpos ? rpos - wpos : capacity_ - wpos };
+}
+
+inline auto client::buffer::write_commit(size_t size) -> void
+{
+  wcount_ += size;
+}
+
+inline auto client::buffer::read_acquire(size_t offset) -> std::pair<uint8_t const*, size_t>
+{
+  unsigned int rc = rcount_ + offset;
+  unsigned int wc = wcount_;
+
+  // is the buffer empty?
+  if (rc >= wc)
+    return { nullptr, 0 };
+
+  // determine current read and write positions
+  auto rpos = rc % capacity_;
+  auto wpos = wc % capacity_;
+
+  // see how much _contiguous_ space is left in our buffer (may be less than total available read
+  // this does not distinguish between full and empty, hence the explicit check above
+  return { &data_[rpos], rpos < wpos ? wpos - rpos : capacity_ - rpos };
+}
+
+inline auto client::buffer::read_commit(size_t size) -> void
+{
+  rcount_ += size;
+}
+
+auto client::buffer::read_ignore_whitespace() -> void
+{
+  while (true)
+  {
+    if (wcount_ == rcount_)
+      return;
+    if (data_[rcount_ % capacity_] > 0x20)
+      break;
+    ++rcount_;
+  }
+}
+
+auto client::buffer::read_starts_with(std::string const& str) const -> bool
+{
+  // cache rcount_ to reduce performance drop of atomic reads
+  size_t rc = rcount_;
+  size_t size = wcount_ - rc;
+
+  // is there even enough data in the buffer?
+  if (size < str.size())
+    return false;
+
+  // check each character for a match
+  for (size_t i = 0; i < str.size(); ++i)
+    if (str[i] != data_[(rc + i) % capacity_])
+      return false;
+
+  return true;
+}
+
+auto client::buffer::read_find(std::string const& str, size_t& offset) const -> bool
+{
+  // cache rcount_ to reduce performance drop of atomic reads
+  size_t rc = rcount_;
+  size_t size = wcount_ - rc;
+
+  // is there even enough data in the buffer?
+  if (size < str.size())
+    return false;
+
+  // naive search through the buffer
+  for (size_t i = 0; i < size - (str.size() - 1); ++i)
+  {
+    for (size_t j = 0; j < str.size(); ++j)
+      if (str[j] != data_[(rc + i + j) % capacity_])
+        goto next_i;
+    offset = i;
+    return true;
+next_i:
+    ;
+  }
+
+  return false;
+}
+
+auto client::buffer::read_find_eol(size_t& offset) const -> bool
+{
+  // cache rcount_ to reduce performance drop of atomic reads
+  size_t rc = rcount_;
+  size_t size = wcount_ - rc;
+
+  for (size_t i = 0; i < size; ++i)
+  {
+    if (   data_[(rc + i) % capacity_] == '\n'
+        || data_[(rc + i) % capacity_] == '\r')
+    {
+      offset = i;
+      return true;
+    }
+  }
+  return false;
+}
+
+client::client(size_t buffer_size, time_t keepalive_period)
+  : keepalive_period_{keepalive_period}
+  , establish_wait_{false}
+  , last_keepalive_{0}
+  , rbuf_{buffer_size}
   , cur_type_{no_message}
   , cur_size_{0}
 { }
 
-client::client(client&& rhs) noexcept
-  : address_(std::move(rhs.address_))
-  , service_(std::move(rhs.service_))
-  , keepalive_period_(std::move(keepalive_period_))
-  , filters_(std::move(rhs.filters_))
-  , socket_{rhs.socket_}
-  , establish_wait_{rhs.establish_wait_}
-  , last_keepalive_{rhs.last_keepalive_}
-  , buffer_(std::move(rhs.buffer_))
-  , capacity_{rhs.capacity_}
-  , wcount_{static_cast<unsigned int>(rhs.wcount_)}
-  , rcount_{static_cast<unsigned int>(rhs.rcount_)}
-  , cur_type_{std::move(rhs.cur_type_)}
-  , cur_size_{std::move(rhs.cur_size_)}
-{
-  rhs.socket_ = -1;
-}
-
-auto client::operator=(client&& rhs) noexcept -> client&
-{
-  address_ = std::move(rhs.address_);
-  service_ = std::move(rhs.service_);
-  keepalive_period_ = std::move(rhs.keepalive_period_);
-  filters_ = std::move(rhs.filters_);
-  socket_ = rhs.socket_;
-  establish_wait_ = rhs.establish_wait_;
-  last_keepalive_ = rhs.last_keepalive_;
-  buffer_ = std::move(rhs.buffer_);
-  capacity_ = rhs.capacity_;
-  wcount_ = static_cast<unsigned int>(rhs.wcount_);
-  rcount_ = static_cast<unsigned int>(rhs.rcount_);
-  cur_type_ = std::move(rhs.cur_type_);
-  cur_size_ = std::move(rhs.cur_size_);
-
-  rhs.socket_ = -1;
-
-  return *this;
-}
-
-client::~client()
-{
-  disconnect();
-}
-
 auto client::add_filter(int station, std::string const& product, std::vector<std::string> const& moments) -> void
 {
-  if (socket_ != -1)
+  if (socket_)
     throw std::runtime_error{"rapic: add_filter called while connected"};
 
   // RPFILTER
@@ -1022,18 +1126,32 @@ auto client::add_filter(int station, std::string const& product, std::vector<std
   filters_.emplace_back(oss.str());
 }
 
-auto client::connect(std::string address, std::string service) -> void
+auto client::accept(socket_handle socket, std::string address, std::string service) -> void
 {
-  if (socket_ != -1)
-    throw std::runtime_error{"rapic: connect called while already connected"};
+  if (socket_)
+    throw std::runtime_error{"rapic: accept called while already connected"};
 
-  // store connection details
+  // set non-blocking I/O
+  int flags = fcntl(socket, F_GETFL);
+  if (flags == -1)
+    throw std::system_error{errno, std::system_category(), "rapic: failed to read socket flags"};
+  if (fcntl(socket, F_SETFL, flags | O_NONBLOCK) == -1)
+    throw std::system_error{errno, std::system_category(), "rapic: failed to set socket flags"};
+
+  // everything succeeded - commit the changes and take ownership of the socket
   address_ = std::move(address);
   service_ = std::move(service);
+  socket_ = std::move(socket);
+  last_keepalive_ = 0;
+  rbuf_.clear();
+  cur_type_ = no_message;
+  cur_size_ = 0;
+}
 
-  // reset connection state
-  wcount_ = 0;
-  rcount_ = 0;
+auto client::connect(std::string address, std::string service) -> void
+{
+  if (socket_)
+    throw std::runtime_error{"rapic: connect called while already connected"};
 
   // lookupt the host
   addrinfo hints, *addr;
@@ -1041,7 +1159,7 @@ auto client::connect(std::string address, std::string service) -> void
   hints.ai_flags = 0;
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
-  int ret = getaddrinfo(address_.c_str(), service_.c_str(), &hints, &addr);
+  int ret = getaddrinfo(address.c_str(), service.c_str(), &hints, &addr);
   if (ret != 0 || addr == nullptr)
     throw std::runtime_error{"rapic: unable to resolve server address"};
 
@@ -1052,60 +1170,61 @@ auto client::connect(std::string address, std::string service) -> void
   }
 
   // create the socket
-  socket_ = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
-  if (socket_ == -1)
+  socket_handle socket{::socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol)};
+  if (!socket)
   {
     freeaddrinfo(addr);
     throw std::system_error{errno, std::system_category(), "rapic: socket creation failed"};
   }
 
   // set non-blocking I/O
-  int flags = fcntl(socket_, F_GETFL);
+  int flags = fcntl(socket, F_GETFL);
   if (flags == -1)
   {
-    disconnect();
     freeaddrinfo(addr);
     throw std::system_error{errno, std::system_category(), "rapic: failed to read socket flags"};
   }
-  if (fcntl(socket_, F_SETFL, flags | O_NONBLOCK) == -1)
+  if (fcntl(socket, F_SETFL, flags | O_NONBLOCK) == -1)
   {
-    disconnect();
     freeaddrinfo(addr);
     throw std::system_error{errno, std::system_category(), "rapic: failed to set socket flags"};
   }
 
   // connect to the remote host
-  ret = ::connect(socket_, addr->ai_addr, addr->ai_addrlen);
+  bool establish_wait = false;
+  ret = ::connect(socket, addr->ai_addr, addr->ai_addrlen);
   if (ret < 0)
   {
     if (errno != EINPROGRESS)
     {
-      disconnect();
       freeaddrinfo(addr);
       throw std::system_error{errno, std::system_category(), "rapic: failed to establish connection"};
     }
-    establish_wait_ = true;
+    establish_wait = true;
   }
-  else
-    establish_wait_ = false;
 
   // clean up the address list allocated by getaddrinfo
   freeaddrinfo(addr);
+
+  // everything succeeded - commit the changes and take ownership of the socket
+  address_ = std::move(address);
+  service_ = std::move(service);
+  socket_ = std::move(socket);
+  establish_wait_ = establish_wait;
+  last_keepalive_ = 0;
+  rbuf_.clear();
+  cur_type_ = no_message;
+  cur_size_ = 0;
 }
 
 auto client::disconnect() -> void
 {
-  if (socket_ != -1)
-  {
-    close(socket_);
-    socket_ = -1;
-    last_keepalive_ = 0;
-  }
+  socket_.reset();
 }
 
 auto client::connected() const -> bool
 {
-  return socket_ != -1;
+  return socket_;
 }
 
 auto client::pollable_fd() const -> int
@@ -1115,17 +1234,17 @@ auto client::pollable_fd() const -> int
 
 auto client::poll_read() const -> bool
 {
-  return socket_ != -1 && !establish_wait_;
+  return socket_ && !establish_wait_;
 }
 
 auto client::poll_write() const -> bool
 {
-  return socket_ != -1 && establish_wait_;
+  return socket_ && establish_wait_;
 }
 
 auto client::poll(int timeout) const -> void
 {
-  if (socket_ == -1)
+  if (!socket_)
     throw std::runtime_error{"rapic: attempt to poll while disconnected"};
 
   struct pollfd fds;
@@ -1137,7 +1256,7 @@ auto client::poll(int timeout) const -> void
 auto client::process_traffic() -> bool
 {
   // sanity check
-  if (socket_ == -1)
+  if (!socket_)
     return false;
 
   // get current time
@@ -1194,26 +1313,21 @@ auto client::process_traffic() -> bool
   // read everything we can
   while (true)
   {
-    // if our buffer is full return and allow client to do some reading
-    if (wcount_ - rcount_ == capacity_)
+    auto space = rbuf_.write_acquire();
+
+    // if our buffer is full return and allow the client to do some reading
+    if (space.second == 0)
       return true;
 
-    // determine current read and write positions
-    auto rpos = rcount_ % capacity_;
-    auto wpos = wcount_ % capacity_;
-
-    // see how much _contiguous_ space is left in our buffer (may be less than total available write space)
-    auto space = wpos < rpos ? rpos - wpos : capacity_ - wpos;
-
     // read some data off the wire
-    auto bytes = recv(socket_, &buffer_[wpos], space, 0);
+    auto bytes = recv(socket_, space.first, space.second, 0);
     if (bytes > 0)
     {
-      // advance our write position
-      wcount_ += bytes;
+      // commit the read bytes to the buffer
+      rbuf_.write_commit(bytes);
 
       // if we read as much as we asked for there may be more still waiting so return true
-      return static_cast<size_t>(bytes) == space;
+      return static_cast<size_t>(bytes) == space.second;
     }
     else if (bytes < 0)
     {
@@ -1257,32 +1371,25 @@ auto client::dequeue(message_type& type) -> bool
 {
   // move along to the next packet in the buffer if needed
   if (cur_type_ != no_message)
-    rcount_ += cur_size_;
-
-  // reset our current type
-  cur_type_ = no_message;
-  cur_size_ = 0;
-
-  // ignore leading whitespace (and return if no data at all)
-  while (true)
   {
-    if (wcount_ == rcount_)
-      return false;
-    if (buffer_[rcount_ % capacity_] > 0x20)
-      break;
-    ++rcount_;
+    rbuf_.read_commit(cur_size_);
+    cur_type_ = no_message;
+    cur_size_ = 0;
   }
 
-  // cache write count to ensure consistent overflow check at the end of this function
-  size_t wc = wcount_;
+  // ignore leading whitespace (and return if no data at all)
+  rbuf_.read_ignore_whitespace();
+
+  // check fullness for overflow check at the end of this function (must be before dequeuing anything)
+  auto full = rbuf_.full();
 
   // is it an MSSG style message?
-  if (buffer_starts_with(msg_mssg_head))
+  if (rbuf_.read_starts_with(msg_mssg_head))
   {
     // status 30 is multi-line terminated by "END STATUS"
-    if (buffer_starts_with(msg_mssg30_head))
+    if (rbuf_.read_starts_with(msg_mssg30_head))
     {
-      if (buffer_find(msg_mssg30_term, cur_size_))
+      if (rbuf_.read_find(msg_mssg30_term, cur_size_))
       {
         cur_type_ = type = message_type::mssg;
         cur_size_ += msg_mssg30_term.size();
@@ -1292,7 +1399,7 @@ auto client::dequeue(message_type& type) -> bool
     // otherwise assume it is a single line message and look for an end of line
     else
     {
-      if (buffer_find(msg_mssg_term, cur_size_))
+      if (rbuf_.read_find_eol(cur_size_))
       {
         cur_type_ = type = message_type::mssg;
         cur_size_ += msg_mssg_term.size();
@@ -1301,9 +1408,9 @@ auto client::dequeue(message_type& type) -> bool
     }
   }
   // is it an RDRSTAT message?
-  else if (buffer_starts_with(msg_status_head))
+  else if (rbuf_.read_starts_with(msg_status_head))
   {
-    if (buffer_find(msg_status_term, cur_size_))
+    if (rbuf_.read_find_eol(cur_size_))
     {
       cur_type_ = type = message_type::status;
       cur_size_ += msg_permcon_term.size();
@@ -1311,9 +1418,9 @@ auto client::dequeue(message_type& type) -> bool
     }
   }
   // is it a SEMIPERMANENT CONNECTION message? (must check this before RPQUERY due to header similarity)
-  else if (buffer_starts_with(msg_permcon_head))
+  else if (rbuf_.read_starts_with(msg_permcon_head))
   {
-    if (buffer_find(msg_permcon_term, cur_size_))
+    if (rbuf_.read_find_eol(cur_size_))
     {
       cur_type_ = type = message_type::permcon;
       cur_size_ += msg_permcon_term.size();
@@ -1321,9 +1428,9 @@ auto client::dequeue(message_type& type) -> bool
     }
   }
   // is it a RPQUERY style message?
-  else if (buffer_starts_with(msg_query_head))
+  else if (rbuf_.read_starts_with(msg_query_head))
   {
-    if (buffer_find(msg_query_term, cur_size_))
+    if (rbuf_.read_find_eol(cur_size_))
     {
       cur_type_ = type = message_type::query;
       cur_size_ += msg_query_term.size();
@@ -1331,9 +1438,9 @@ auto client::dequeue(message_type& type) -> bool
     }
   }
   // is it an RPFILTER styles message?
-  else if (buffer_starts_with(msg_filter_head))
+  else if (rbuf_.read_starts_with(msg_filter_head))
   {
-    if (buffer_find(msg_filter_term, cur_size_))
+    if (rbuf_.read_find_eol(cur_size_))
     {
       cur_type_ = type = message_type::filter;
       cur_size_ += msg_filter_term.size();
@@ -1343,7 +1450,7 @@ auto client::dequeue(message_type& type) -> bool
   // otherwise assume it is a scan message and look for "END RADAR IMAGE"
   else
   {
-    if (buffer_find(msg_scan_term, cur_size_))
+    if (rbuf_.read_find(msg_scan_term, cur_size_))
     {
       cur_type_ = type = message_type::scan;
       cur_size_ += msg_scan_term.size();
@@ -1351,8 +1458,8 @@ auto client::dequeue(message_type& type) -> bool
     }
   }
 
-  // if the buffer is full but we still cannot read a message then we are in overflow, fail hard
-  if (wc - rcount_ == capacity_)
+  // if the buffer was full when entering but we could not read a message then we are in overflow, fail hard
+  if (full)
     throw std::runtime_error{"rapic: buffer overflow (try increasing buffer size)"};
 
   return false;
@@ -1369,61 +1476,158 @@ auto client::decode(message& msg) -> void
       throw std::runtime_error{"rapic: incorrect type passed for decoding"};
   }
 
-  // if the message spans the buffer wrap around point, copy it into a temporary location to ease parsing
-  auto pos = rcount_ % capacity_;
-  if (pos + cur_size_ > capacity_)
+  try
   {
-    std::unique_ptr<uint8_t[]> buf{new uint8_t[cur_size_]};
-    std::memcpy(buf.get(), &buffer_[pos], capacity_ - pos);
-    std::memcpy(buf.get() + capacity_ - pos, &buffer_[0], cur_size_ - (capacity_ - pos));
-    msg.decode(buf.get(), cur_size_);
+    // if the message spans the buffer wrap around point, copy it into a temporary location to ease parsing
+    auto space = rbuf_.read_acquire();
+    if (space.second < cur_size_)
+    {
+      std::unique_ptr<uint8_t[]> buf{new uint8_t[cur_size_]};
+      std::memcpy(buf.get(), space.first, space.second);
+      std::memcpy(buf.get() + space.second, rbuf_.read_acquire(space.second).first, cur_size_ - space.second);
+      msg.decode(buf.get(), cur_size_);
+    }
+    else
+      msg.decode(space.first, cur_size_);
+  }
+  catch (...)
+  {
+    rbuf_.read_commit(cur_size_);
+    cur_type_ = no_message;
+    cur_size_ = 0;
+  }
+
+  rbuf_.read_commit(cur_size_);
+  cur_type_ = no_message;
+  cur_size_ = 0;
+}
+
+server::server()
+{ }
+
+auto server::listen(std::string service, bool ipv6) -> void
+{
+  if (socket_)
+    throw std::runtime_error{"rapic: attempt to listen while already listening"};
+
+  // lookup the port for the desired service
+  uint16_t port = 0;
+  if (struct servent* ent = getservbyname(service.c_str(), "tcp"))
+    port = ntohs(ent->s_port);
+  endservent();
+
+  // if we couldn't find a service, try to parse as a port number directly
+  if (port == 0)
+    port = std::atoi(service.c_str());
+  if (port == 0)
+    throw std::runtime_error{"unknown or invalid service or port '" + service + "'"};
+
+  // create the listen socket
+  socket_.reset(::socket(ipv6 ? AF_INET6 : AF_INET, SOCK_STREAM, 0));
+  if (socket_ < 0)
+    throw std::system_error{errno, std::generic_category(), "socket creation failed"};
+
+  // allow immediate reuse of server socket after failure
+  int on = 1;
+  if (setsockopt(socket_, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0)
+    throw std::system_error{errno, std::generic_category(), "socket reuse mode set failed"};
+
+  if (ipv6)
+  {
+    // allow connections from ipv4 clients when using an ipv6 socket
+    on = 0;
+    if (setsockopt(socket_, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof(on)) < 0)
+      throw std::system_error{errno, std::generic_category(), "socket failed to disable ipv6 only"};
+
+    // build a local address
+    struct sockaddr_in6 addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin6_family = AF_INET6;
+    addr.sin6_port = htons(port);
+    addr.sin6_addr = in6addr_any;
+
+    // bind the address
+    if (bind(socket_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0)
+      throw std::system_error{errno, std::generic_category(), "socket bind failed"};
   }
   else
-    msg.decode(&buffer_[pos], cur_size_);
-}
-
-auto client::buffer_starts_with(std::string const& str) const -> bool
-{
-  // cache rcount_ to reduce performance drop of atomic reads
-  // this function is only ever called from the read thread
-  size_t rc = rcount_;
-
-  // is there even enough data in the buffer?
-  auto size = wcount_ - rc;
-  if (size < str.size())
-    return false;
-
-  // check each character for a match
-  for (size_t i = 0; i < str.size(); ++i)
-    if (str[i] != buffer_[(rc + i) % capacity_])
-      return false;
-
-  return true;
-}
-
-auto client::buffer_find(std::string const& str, size_t& pos) const -> bool
-{
-  // cache rcount_ to reduce performance drop of atomic reads
-  // this function is only ever called from the read thread
-  size_t rc = rcount_;
-
-  // is there even enough data in the buffer?
-  auto size = wcount_ - rc;
-  if (size < str.size())
-    return false;
-
-  // naive search through the buffer
-  for (size_t i = 0; i < size - str.size(); ++i)
   {
-    for (size_t j = 0; j < str.size(); ++j)
-      if (str[j] != buffer_[(rc + i + j) % capacity_])
-        goto next_i;
-    pos = i;
-    return true;
-next_i:
-    ;
+    // build a local address
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = INADDR_ANY;
+
+    // bind the address
+    if (bind(socket_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0)
+      throw std::system_error{errno, std::generic_category(), "socket bind failed"};
   }
 
-  // we return 0 to indicate failure - it's easy but
+  // mark as a passive socket
+  if (::listen(socket_, SOMAXCONN) < 0)
+    throw std::system_error{errno, std::generic_category(), "socket listen failed"};
+
+  // set as a non-blocking socket
+  int flags = fcntl(socket_, F_GETFL);
+  if (flags == -1)
+    throw std::system_error{errno, std::generic_category(), "failed to read socket flags"};
+  if (fcntl(socket_, F_SETFL, flags | O_NONBLOCK) == -1)
+    throw std::system_error{errno, std::generic_category(), "failed to set socket flags"};
+}
+
+auto server::release() -> void
+{
+  socket_.reset();
+}
+
+auto server::accept_pending_connections(size_t buffer_size, time_t keepalive_period) -> std::list<client>
+{
+  sockaddr_storage sa;
+  socklen_t salen = sizeof(sa);
+
+  std::list<client> clients;
+  while (true)
+  {
+    // try to accept a pending connection
+    socket_handle socket{accept(socket_, (sockaddr*) &sa, &salen)};
+    if (!socket)
+    {
+      if (errno == EINTR)
+        continue;
+      if (errno == EAGAIN || errno == EWOULDBLOCK)
+        break;
+      throw std::system_error{errno, std::generic_category(), "failed to accept socket"};
+    }
+
+    // convert the address into something readable
+    char hostbuf[128]; char servbuf[32];
+    if (getnameinfo(
+              (struct sockaddr*) &sa, salen
+            , hostbuf, sizeof(hostbuf)
+            , servbuf, sizeof(servbuf)
+            , NI_NUMERICHOST | NI_NUMERICSERV) != 0)
+      throw std::system_error{errno, std::generic_category(), "getnameinfo failure"};
+
+    // initialize a connection manager to own the connection
+    client cli{buffer_size, keepalive_period};
+    cli.accept(std::move(socket), hostbuf, servbuf);
+    clients.push_back(std::move(cli));
+  }
+  return clients;
+}
+
+auto server::pollable_fd() const -> int
+{
+  return socket_;
+}
+
+auto server::poll_read() const -> bool
+{
+  return socket_;
+}
+
+auto server::poll_write() const -> bool
+{
   return false;
 }

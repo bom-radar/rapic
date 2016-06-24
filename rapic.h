@@ -415,6 +415,28 @@ namespace rapic
     float       angle_resolution_;
   };
 
+  /// RAII wrapper for a socket file descriptor
+  class socket_handle
+  {
+  public:
+    explicit socket_handle(int fd = -1) : fd_(fd) { }
+    socket_handle(const socket_handle& rhs) = delete;
+    socket_handle(socket_handle&& rhs) noexcept : fd_(rhs.fd_) { rhs.fd_ = -1; }
+    socket_handle& operator=(const socket_handle& rhs) = delete;
+    socket_handle& operator=(socket_handle&& rhs) noexcept { std::swap(fd_, rhs.fd_); return *this; }
+    ~socket_handle();
+
+    operator int() const                      { return fd_; }
+    operator bool() const                     { return fd_ != -1; }
+
+    auto fd() const -> int                    { return fd_; }
+    auto reset(int fd = -1) -> void;
+    auto release() -> int;
+
+  private:
+    int fd_;
+  };
+
   /// Rapic protocol connection manager
   /** This class is implemented with the expectation that it may be used in an environment where asynchronous I/O
    *  is desired.  As such, the most basic use of this class requires calling separate functions for checking
@@ -470,19 +492,22 @@ namespace rapic
     auto operator=(client const&) -> client& = delete;
 
     /// Move construct a client connection
-    client(client&& rhs) noexcept;
+    client(client&& rhs) noexcept = default;
 
     /// Move assign a client connection
-    auto operator=(client&& rhs) noexcept -> client&;
+    auto operator=(client&& rhs) noexcept -> client& = default;
 
     /// Destroy the client connection and automatically disconnect if needed
-    ~client();
+    ~client() = default;
 
     /// Add a product to filter for radar products
     /** Filters added by this function will only take effect at the next call to connect(). */
     auto add_filter(int station, std::string const& product, std::vector<std::string> const& moments = {}) -> void;
 
-    /// Connect to a server
+    /// Accept a pending connection from a listening socket
+    auto accept(socket_handle sock, std::string address, std::string service) -> void;
+
+    /// Connect to a remote server
     auto connect(std::string address, std::string service) -> void;
 
     /// Disconnect from the server
@@ -541,30 +566,90 @@ namespace rapic
     auto decode(message& msg) -> void;
 
   private:
-    using filter_store = std::vector<std::string>;
-    using buffer = std::unique_ptr<uint8_t[]>;
+    class buffer
+    {
+    public:
+      buffer(size_t capacity);
+      buffer(buffer&& rhs) noexcept;
 
-  private:
-    auto buffer_ignore_whitespace() -> void;
-    auto buffer_starts_with(std::string const& str) const -> bool;
-    auto buffer_find(std::string const& str, size_t& pos) const -> bool;
+      // reset the buffer to an empty state
+      auto clear() -> void;
+
+      // is the buffer full?
+      auto full() const -> bool;
+
+      // get a pointer to the write position and the amount of contiguous space available for writing
+      auto write_acquire() -> std::pair<uint8_t*, size_t>;
+      // commit data which has been written to the pointer returned by write_acquire
+      auto write_commit(size_t size) -> void;
+
+      // get a pointer to the read position and the amount of contiguous space available for reading
+      auto read_acquire(size_t offset = 0) -> std::pair<uint8_t const*, size_t>;
+      // advance the read position by the set amount
+      auto read_commit(size_t size) -> void;
+
+      // advance the read position past whitespace
+      auto read_ignore_whitespace() -> void;
+      // check if buffer starts with given string
+      auto read_starts_with(std::string const& str) const -> bool;
+      // check if buffer contains given string and store its offset from current read position
+      auto read_find(std::string const& str, size_t& offset) const -> bool;
+      // check if buffer contains an end of line character and store its offset from current read position
+      auto read_find_eol(size_t& offset) const -> bool;
+
+    private:
+      size_t                      capacity_;          // total usable buffer capacity
+      std::unique_ptr<uint8_t[]>  data_;              // ring buffer to store packets off the wire
+      std::atomic_uint            wcount_;            // total bytes that have been written (wraps)
+      std::atomic_uint            rcount_;            // total bytes that have been read (wraps)
+    };
+    using filter_store = std::vector<std::string>;
 
   private:
     std::string       address_;           // remote hostname or address
     std::string       service_;           // remote service or port number
     time_t            keepalive_period_;  // time between sending keepalives
     filter_store      filters_;           // filter strings
-    int               socket_;            // socket handle
+    socket_handle     socket_;            // socket handle
     bool              establish_wait_;    // are we waiting for socket connection to be established?
     time_t            last_keepalive_;    // time of last keepalive send
 
-    buffer            buffer_;            // ring buffer to store packets off the wire
-    size_t            capacity_;          // total usable buffer capacity
-    std::atomic_uint  wcount_;            // total bytes that have been written (wraps)
-    std::atomic_uint  rcount_;            // total bytes that have been read (wraps)
+    buffer            rbuf_;              // read buffer
 
     message_type      cur_type_;          // type of currently dequeued message (awaiting decode)
     size_t            cur_size_;          // size of currently dequeued message
+  };
+
+  /// Rapic protocol listen socket manager
+  class server
+  {
+  public:
+    server();
+
+    /// Start listening for new clients on the passed service/port
+    auto listen(std::string service, bool ipv6 = true) -> void;
+
+    /// Cease listening for new clients and release the service/port
+    auto release() -> void;
+
+    /// Accept any pending connections and return connection managers for them
+    auto accept_pending_connections(size_t buffer_size = 10 * 1024 * 1024, time_t keepalive_period = 40) -> std::list<client>;
+
+    /// Get the file descriptor of the socket which may be used for multiplexed polling
+    /** This function along with poll_read and poll_write are useful in an asynchronous I/O environment and you
+     *  would like to block on multiple I/O sources.  The file descriptor returned by this function may be passed
+     *  to pselect or a similar function.  The poll_read and poll_write functions return true if you should wait
+     *  for read and write availability respectively. */
+    auto pollable_fd() const -> int;
+
+    /// Get whether the socket file descriptor should be monitored for read availability
+    auto poll_read() const -> bool;
+
+    /// Get whether the socket file descriptor should be montored for write availability
+    auto poll_write() const -> bool;
+
+  private:
+    socket_handle     socket_;            // listen socket handle
   };
 
   /// Write a list of rapic scans as an ODIM_H5 polar volume file
