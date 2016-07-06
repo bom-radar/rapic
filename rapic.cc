@@ -295,8 +295,10 @@ auto mssg::reset() -> void
 
 auto mssg::encode(uint8_t* out, size_t size) const -> size_t
 {
-  // TODO
-  return 0;
+  if (number_ == 30)
+    return snprintf(reinterpret_cast<char*>(out), size, "MSSG: 30 %s\nEND STATUS\n", text_.c_str());
+  else
+    return snprintf(reinterpret_cast<char*>(out), size, "MSSG: %d %s\n", number_, text_.c_str());
 }
 
 auto mssg::decode(uint8_t const* in, size_t size) -> size_t
@@ -351,8 +353,7 @@ auto status::reset() -> void
 
 auto status::encode(uint8_t* out, size_t size) const -> size_t
 {
-  // TODO
-  return 0;
+  return snprintf(reinterpret_cast<char*>(out), size, "RDRSTAT: %s\n", text_.c_str());
 }
 
 auto status::decode(uint8_t const* in, size_t size) -> size_t
@@ -393,8 +394,11 @@ auto permcon::reset() -> void
 
 auto permcon::encode(uint8_t* out, size_t size) const -> size_t
 {
-  // TODO
-  return 0;
+  return snprintf(
+        reinterpret_cast<char*>(out)
+      , size
+      , "RPQUERY: SEMIPERMANENT CONNECTION - SEND ALL DATA TXCOMPLETESCANS=%d\n"
+      , tx_complete_scans_);
 }
 
 auto permcon::decode(uint8_t const* in, size_t size) -> size_t
