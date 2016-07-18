@@ -216,7 +216,7 @@ auto handle_rapic_messages(rapic::client& con) -> void
     case rapic::message_type::status:
       {
         rapic::status msg;
-        //con.decode(msg);
+        con.decode(msg);
         std::cout << "STATUS: " << std::endl;
       }
       break;
@@ -232,7 +232,7 @@ auto handle_rapic_messages(rapic::client& con) -> void
     case rapic::message_type::query:
       {
         rapic::query msg;
-        //con.decode(msg);
+        con.decode(msg);
         std::cout << "QUERY: " << std::endl;
       }
       break;
