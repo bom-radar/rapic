@@ -37,32 +37,8 @@ set(CMAKE_BUILD_TYPE ${DEF_BUILD_TYPE} CACHE STRING "Build type: <none>|Debug|Re
 # initialize our project
 project(rapic)
 
-# default locations based on system configuration
-get_property(LIB64 GLOBAL PROPERTY FIND_LIBRARY_USE_LIB64_PATHS)
-if (LIB64)
-  set(DEF_INSTALL_LIB_DIR lib64)
-else()
-  set(DEF_INSTALL_LIB_DIR lib)
-endif()
-if (WIN32 AND NOT CYGWIN)
-  set(DEF_INSTALL_CMAKE_DIR cmake)
-else()
-  set(DEF_INSTALL_CMAKE_DIR ${DEF_INSTALL_LIB_DIR}/cmake/rapic)
-endif()
-
-# customizable install locations
-set(INSTALL_LIB_DIR ${DEF_INSTALL_LIB_DIR} CACHE PATH "Installation directory for libraries")
-set(INSTALL_BIN_DIR bin CACHE PATH "Installation directory for executables")
-set(INSTALL_INCLUDE_DIR include CACHE PATH "Installation directory for header files")
-set(INSTALL_CMAKE_DIR ${DEF_INSTALL_CMAKE_DIR} CACHE PATH "Installation directory for CMake files")
-
-# convert relative paths to absolute
-foreach(p LIB INCLUDE CMAKE)
-  set(var INSTALL_${p}_DIR)
-  if (NOT IS_ABSOLUTE "${${var}}")
-    set(${var} "${CMAKE_INSTALL_PREFIX}/${${var}}")
-  endif()
-endforeach()
+# setup standard install locations
+include(GNUInstallDirs)
 
 # external dependencies
 find_package(odim_h5)
@@ -105,19 +81,19 @@ set_target_properties(rapic PROPERTIES VERSION "${RAPIC_VERSION}")
 set_target_properties(rapic PROPERTIES PUBLIC_HEADER rapic.h)
 install(TARGETS rapic
   EXPORT rapic-targets
-  LIBRARY DESTINATION "${INSTALL_LIB_DIR}" COMPONENT shlib
-  PUBLIC_HEADER DESTINATION "${INSTALL_INCLUDE_DIR}"
+  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT shlib
+  PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   COMPONENT dev)
 
 # create pkg-config file
 configure_file(rapic.pc.in "${PROJECT_BINARY_DIR}/rapic.pc" @ONLY)
-install(FILES "${PROJECT_BINARY_DIR}/rapic.pc" DESTINATION "${INSTALL_LIB_DIR}/pkgconfig")
+install(FILES "${PROJECT_BINARY_DIR}/rapic.pc" DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
 
 # build our rapic to odim convertor
 if (odim_h5_FOUND)
   add_executable(rapic_to_odim rapic_to_odim.cc)
   target_link_libraries(rapic_to_odim rapic)
-  install(TARGETS rapic_to_odim DESTINATION "${INSTALL_BIN_DIR}")
+  install(TARGETS rapic_to_odim DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
 
 # build our demo application (not in the 'all' target.  type 'make demo' to build)
@@ -128,8 +104,7 @@ set_target_properties(demo PROPERTIES EXCLUDE_FROM_ALL 1)
 # boilerplate to generate our config and version cmake files
 
 # create config files
-file(RELATIVE_PATH REL_INCLUDE_DIR "${INSTALL_CMAKE_DIR}" "${INSTALL_INCLUDE_DIR}")
-set(CONF_INCLUDE_DIRS "\${RAPIC_CMAKE_DIR}/${REL_INCLUDE_DIR}")
+file(RELATIVE_PATH REL_INCLUDE_DIR "${CMAKE_INSTALL_FULL_LIBDIR}/cmake/rapic" "${CMAKE_INSTALL_FULL_INCLUDEDIR}")
 configure_file(rapic-config.cmake.in "${PROJECT_BINARY_DIR}/rapic-config.cmake" @ONLY)
 configure_file(rapic-config-version.cmake.in "${PROJECT_BINARY_DIR}/rapic-config-version.cmake" @ONLY)
 
@@ -137,7 +112,7 @@ configure_file(rapic-config-version.cmake.in "${PROJECT_BINARY_DIR}/rapic-config
 install(FILES
   "${PROJECT_BINARY_DIR}/rapic-config.cmake"
   "${PROJECT_BINARY_DIR}/rapic-config-version.cmake"
-  DESTINATION "${INSTALL_CMAKE_DIR}" COMPONENT dev)
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rapic" COMPONENT dev)
 
 # install the export set for use with the install-tree
-install(EXPORT rapic-targets DESTINATION "${INSTALL_CMAKE_DIR}" COMPONENT dev)
+install(EXPORT rapic-targets DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rapic" COMPONENT dev)

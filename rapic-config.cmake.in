@@ -5,5 +5,5 @@
 
 get_filename_component(RAPIC_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
 include("${RAPIC_CMAKE_DIR}/rapic-targets.cmake")
-set(RAPIC_INCLUDE_DIRS "@CONF_INCLUDE_DIRS@")
+set(RAPIC_INCLUDE_DIRS "${RAPIC_CMAKE_DIR}/@REL_INCLUDE_DIR@")
 set(RAPIC_LIBRARIES rapic)
