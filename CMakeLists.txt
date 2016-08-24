@@ -22,8 +22,8 @@ cmake_minimum_required(VERSION 3.1)
 #  - minor -> update when breaking ABI - users only need to re-link
 #  - patch -> update when no-relink is required (ie: self-contained inside .so)
 set(RAPIC_VERSION_MAJOR 1)
-set(RAPIC_VERSION_MINOR 0)
-set(RAPIC_VERSION_PATCH 0)
+set(RAPIC_VERSION_MINOR 1)
+set(RAPIC_VERSION_PATCH 2)
 set(RAPIC_VERSION "${RAPIC_VERSION_MAJOR}.${RAPIC_VERSION_MINOR}.${RAPIC_VERSION_PATCH}")
 
 # default to a release build (must be before project())
