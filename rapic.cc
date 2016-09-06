@@ -251,7 +251,7 @@ try
 
       // create the ray entry
       ray_headers_.emplace_back(angle);
-      
+
       // decode the data into levels
       auto out = &level_data_[bins_ * (ray_headers_.size() - 1)];
       int prev = 0;
@@ -300,6 +300,15 @@ try
         // null or end of line character - end of radial
         else if (cur.type == enc_type::terminate)
         {
+          /* hack to work around extra newline characters that corrupt the data stream of some radars
+           * (looking at you Dampier).  if we ever have headers appear in the file after rays then this
+           * will break. */
+          if (   pos < size
+              && in[pos] != '%'
+              && size - pos >= msg_scan_term.size()
+              && strncmp(reinterpret_cast<char const*>(&in[pos]), msg_scan_term.c_str(), msg_scan_term.size()) != 0)
+            continue;
+
           --pos;
           break;
         }
@@ -367,7 +376,7 @@ try
       for (pos2 = pos + 1; pos2 < size; ++pos2)
         if (in[pos2] < ' ' || in[pos2] == ':')
           break;
-      
+
       // check for end of scan or corruption
       if (pos2 >= size || in[pos2] != ':')
       {
