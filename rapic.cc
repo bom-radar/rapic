@@ -303,11 +303,16 @@ try
           /* hack to work around extra newline characters that corrupt the data stream of some radars
            * (looking at you Dampier).  if we ever have headers appear in the file after rays then this
            * will break. */
-          if (   pos < size
-              && in[pos] != '%'
-              && size - pos >= msg_scan_term.size()
-              && strncmp(reinterpret_cast<char const*>(&in[pos]), msg_scan_term.c_str(), msg_scan_term.size()) != 0)
-            continue;
+          {
+            auto i = pos;
+            while (i < size && in[i] <= ' ')
+              ++i;
+            if (   i < size
+                && in[i] != '%'
+                && size - i >= msg_scan_term.size()
+                && strncmp(reinterpret_cast<char const*>(&in[i]), msg_scan_term.c_str(), msg_scan_term.size()) != 0)
+              continue;
+          }
 
           --pos;
           break;
