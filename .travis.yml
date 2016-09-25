@@ -15,24 +15,14 @@ addons:
       - libhdf5-dev
 
 install:
-  - pwd
-  - ls
   - git clone https://github.com/bom-radar/odim_h5.git
-  - pushd odim_h5
-  - pwd
-  - ls
-  - mkdir build && pushd build
+  - mkdir odim_h5/build
+  - pushd odim_h5/build
   - cmake .. && make && sudo make install
-  - pwd
-  - ls
   - popd
-  - pwd
-  - ls
 
 # the actual build and test process
 script:
-  - pwd
-  - ls
   - mkdir build
-  - cd build
+  - pushd build
   - cmake .. && make
