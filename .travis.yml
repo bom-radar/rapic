@@ -18,7 +18,7 @@ install:
   - git clone https://github.com/bom-radar/odim_h5.git
   - pushd odim_h5
   - mkdir build && pushd build
-  - cmake .. && make && make install
+  - cmake .. && make && sudo make install
   - popd
 
 # the actual build and test process
