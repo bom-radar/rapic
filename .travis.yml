@@ -1,0 +1,28 @@
+# enable the 'trusty beta' VM to access a modern gcc
+dist: trusty
+sudo: required
+
+# setup for C++
+language: c++
+compiler:
+  - clang
+  - gcc
+
+# install dependencies (for ODIM)
+addons:
+  apt:
+    packages:
+      - libhdf5-dev
+
+install:
+  - git clone https://github.com/bom-radar/odim_h5.git
+  - mkdir odim_h5/build
+  - pushd odim_h5/build
+  - cmake .. && make && sudo make install
+  - popd
+
+# the actual build and test process
+script:
+  - mkdir build
+  - pushd build
+  - cmake .. && make

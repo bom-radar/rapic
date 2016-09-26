@@ -757,6 +757,20 @@ try
         // null or end of line character - end of radial
         else if (cur.type == enc_type::terminate)
         {
+          /* hack to work around extra newline characters that corrupt the data stream of some radars
+           * (looking at you Dampier).  if we ever have headers appear in the file after rays then this
+           * will break. */
+          {
+            auto i = pos;
+            while (i < size && in[i] <= ' ')
+              ++i;
+            if (   i < size
+                && in[i] != '%'
+                && size - i >= msg_scan_term.size()
+                && strncmp(reinterpret_cast<char const*>(&in[i]), msg_scan_term.c_str(), msg_scan_term.size()) != 0)
+              continue;
+          }
+
           --pos;
           break;
         }

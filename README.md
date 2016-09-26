@@ -1,4 +1,6 @@
 # Rapic Protocol Support Library
+[![Build Status](https://travis-ci.org/bom-radar/rapic.svg?branch=master)](https://travis-ci.org/bom-radar/rapic)
+
 This library implements the rapic client protocol and makes it easy for you to
 integrate live radar data into your application.
 
