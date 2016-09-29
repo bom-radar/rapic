@@ -1,29 +1,65 @@
-# enable the 'trusty beta' VM to access a modern gcc
-dist: trusty
-sudo: required
-
-# setup for C++
-language: c++
+sudo: false
+language: cpp
 compiler:
-  - clang
   - gcc
-
-# install dependencies (for ODIM)
+  - clang
 addons:
   apt:
+    sources:
+      - llvm-toolchain-precise
+      - ubuntu-toolchain-r-test
     packages:
+      - clang-3.7
+      - g++-5
+      - gcc-5
       - libhdf5-dev
-
 install:
+  - if [ "$CXX" = "g++" ]; then export CXX="g++-5" CC="gcc-5"; fi
+  - if [ "$CXX" = "clang++" ]; then export CXX="clang++-3.7" CC="clang-3.7"; fi
   - git clone https://github.com/bom-radar/odim_h5.git
   - mkdir odim_h5/build
   - pushd odim_h5/build
   - cmake --version
   - cmake .. && make && sudo make install
   - popd
-
-# the actual build and test process
 script:
   - mkdir build
   - pushd build
   - cmake .. && make
+
+
+
+
+## enable the 'trusty beta' VM to access a modern gcc
+#dist: trusty
+#sudo: required
+#
+## setup for C++
+#language: c++
+#compiler:
+#  - clang
+#  - gcc
+#
+## install dependencies (for ODIM)
+#addons:
+#  apt:
+#    sources:
+#      - ubuntu-toolchain-r-test
+#    packages:
+#      - libhdf5-dev
+#      - gcc-5
+#      - g++-5
+#
+#install:
+#  - git clone https://github.com/bom-radar/odim_h5.git
+#  - mkdir odim_h5/build
+#  - pushd odim_h5/build
+#  - cmake --version
+#  - cmake .. && make && sudo make install
+#  - popd
+#
+## the actual build and test process
+#script:
+#  - mkdir build
+#  - pushd build
+#  - cmake .. && make
