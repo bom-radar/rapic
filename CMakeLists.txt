@@ -81,19 +81,30 @@ set_target_properties(rapic PROPERTIES VERSION "${RAPIC_VERSION}")
 set_target_properties(rapic PROPERTIES PUBLIC_HEADER rapic.h)
 install(TARGETS rapic
   EXPORT rapic-targets
-  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT shlib
-  PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-  COMPONENT dev)
+  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT runtime
+  PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel)
 
 # create pkg-config file
 configure_file(rapic.pc.in "${PROJECT_BINARY_DIR}/rapic.pc" @ONLY)
-install(FILES "${PROJECT_BINARY_DIR}/rapic.pc" DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
+install(FILES "${PROJECT_BINARY_DIR}/rapic.pc" DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig" COMPONENT devel)
+
+# create config files
+file(RELATIVE_PATH REL_INCLUDE_DIR "${CMAKE_INSTALL_FULL_LIBDIR}/cmake/rapic" "${CMAKE_INSTALL_FULL_INCLUDEDIR}")
+configure_file(rapic-config.cmake.in "${PROJECT_BINARY_DIR}/rapic-config.cmake" @ONLY)
+configure_file(rapic-config-version.cmake.in "${PROJECT_BINARY_DIR}/rapic-config-version.cmake" @ONLY)
+install(FILES
+  "${PROJECT_BINARY_DIR}/rapic-config.cmake"
+  "${PROJECT_BINARY_DIR}/rapic-config-version.cmake"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rapic" COMPONENT devel)
+
+# install the export set for use with the install-tree
+install(EXPORT rapic-targets DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rapic" COMPONENT devel)
 
 # build our rapic to odim convertor
 if (odim_h5_FOUND)
   add_executable(rapic_to_odim rapic_to_odim.cc)
   target_link_libraries(rapic_to_odim rapic)
-  install(TARGETS rapic_to_odim DESTINATION "${CMAKE_INSTALL_BINDIR}")
+  install(TARGETS rapic_to_odim DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime)
 endif()
 
 # build our demo application (not in the 'all' target.  type 'make demo' to build)
@@ -101,18 +112,15 @@ add_executable(demo demo.cc)
 target_link_libraries(demo rapic)
 set_target_properties(demo PROPERTIES EXCLUDE_FROM_ALL 1)
 
-# boilerplate to generate our config and version cmake files
-
-# create config files
-file(RELATIVE_PATH REL_INCLUDE_DIR "${CMAKE_INSTALL_FULL_LIBDIR}/cmake/rapic" "${CMAKE_INSTALL_FULL_INCLUDEDIR}")
-configure_file(rapic-config.cmake.in "${PROJECT_BINARY_DIR}/rapic-config.cmake" @ONLY)
-configure_file(rapic-config-version.cmake.in "${PROJECT_BINARY_DIR}/rapic-config-version.cmake" @ONLY)
-
-# install the config files
-install(FILES
-  "${PROJECT_BINARY_DIR}/rapic-config.cmake"
-  "${PROJECT_BINARY_DIR}/rapic-config-version.cmake"
-  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rapic" COMPONENT dev)
-
-# install the export set for use with the install-tree
-install(EXPORT rapic-targets DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rapic" COMPONENT dev)
+# build installation packages
+set(CPACK_PACKAGE_VENDOR "Australian Government, Bureau of Meteorology")
+set(CPACK_PACKAGE_VERSION_MAJOR ${RAPIC_VERSION_MAJOR})
+set(CPACK_PACKAGE_VERSION_MINOR ${RAPIC_VERSION_MINOR})
+set(CPACK_PACKAGE_VERSION_PATCH ${RAPIC_VERSION_PATCH})
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Rapic Protocol Support Library")
+set(CPACK_PACKAGE_DESCRIPTION_FILE "${PROJECT_SOURCE_DIR}/description")
+set(CPACK_API_DEPS ${API_DEPS})
+set(CPACK_INSTALL_LIBDIR ${CMAKE_INSTALL_LIBDIR})
+set(CPACK_COMPONENT_DEVEL_DEPENDS runtime)
+set(CPACK_PROJECT_CONFIG_FILE "${PROJECT_SOURCE_DIR}/CPackOptions.cmake")
+include(CPack)
