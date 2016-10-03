@@ -538,8 +538,8 @@ client::client(client&& rhs) noexcept
   , last_keepalive_{rhs.last_keepalive_}
   , buffer_(std::move(rhs.buffer_))
   , capacity_{rhs.capacity_}
-  , wcount_{static_cast<unsigned int>(rhs.wcount_)}
-  , rcount_{static_cast<unsigned int>(rhs.rcount_)}
+  , wcount_{rhs.wcount_.load()}
+  , rcount_{rhs.rcount_.load()}
   , cur_type_{std::move(rhs.cur_type_)}
   , cur_size_{std::move(rhs.cur_size_)}
 {
@@ -557,8 +557,8 @@ auto client::operator=(client&& rhs) noexcept -> client&
   last_keepalive_ = rhs.last_keepalive_;
   buffer_ = std::move(rhs.buffer_);
   capacity_ = rhs.capacity_;
-  wcount_ = static_cast<unsigned int>(rhs.wcount_);
-  rcount_ = static_cast<unsigned int>(rhs.rcount_);
+  wcount_ = rhs.wcount_.load();
+  rcount_ = rhs.rcount_.load();
   cur_type_ = std::move(rhs.cur_type_);
   cur_size_ = std::move(rhs.cur_size_);
 
@@ -617,7 +617,7 @@ auto client::connect(std::string address, std::string service) -> void
   // TODO - loop through all addresses?
   if (addr->ai_next)
   {
-    
+
   }
 
   // create the socket
@@ -839,7 +839,7 @@ auto client::dequeue(message_type& type) -> bool
   }
 
   // cache write count to ensure consistent overflow check at the end of this function
-  size_t wc = wcount_;
+  auto wc = wcount_.load();
 
   // is it an MSSG style message?
   if (buffer_starts_with(msg_mssg_head))
@@ -879,7 +879,7 @@ auto client::dequeue(message_type& type) -> bool
   // if the buffer is full but we still cannot read a message then we are in overflow, fail hard
   if (wc - rcount_ == capacity_)
     throw std::runtime_error{"rapic: buffer overflow (try increasing buffer size)"};
-  
+
   return false;
 }
 
@@ -933,7 +933,7 @@ auto client::buffer_starts_with(std::string const& str) const -> bool
 {
   // cache rcount_ to reduce performance drop of atomic reads
   // this function is only ever called from the read thread
-  size_t rc = rcount_;
+  auto rc = rcount_.load();
 
   // is there even enough data in the buffer?
   auto size = wcount_ - rc;
@@ -952,7 +952,7 @@ auto client::buffer_find(std::string const& str, size_t& pos) const -> bool
 {
   // cache rcount_ to reduce performance drop of atomic reads
   // this function is only ever called from the read thread
-  size_t rc = rcount_;
+  auto rc = rcount_.load();
 
   // is there even enough data in the buffer?
   auto size = wcount_ - rc;

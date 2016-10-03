@@ -344,21 +344,21 @@ namespace rapic
     auto buffer_find(std::string const& str, size_t& pos) const -> bool;
 
   private:
-    std::string       address_;           // remote hostname or address
-    std::string       service_;           // remote service or port number
-    time_t            keepalive_period_;  // time between sending keepalives
-    filter_store      filters_;           // filter strings
-    int               socket_;            // socket handle
-    bool              establish_wait_;    // are we waiting for socket connection to be established?
-    time_t            last_keepalive_;    // time of last keepalive send
+    std::string         address_;           // remote hostname or address
+    std::string         service_;           // remote service or port number
+    time_t              keepalive_period_;  // time between sending keepalives
+    filter_store        filters_;           // filter strings
+    int                 socket_;            // socket handle
+    bool                establish_wait_;    // are we waiting for socket connection to be established?
+    time_t              last_keepalive_;    // time of last keepalive send
 
-    buffer            buffer_;            // ring buffer to store packets off the wire
-    size_t            capacity_;          // total usable buffer capacity
-    std::atomic_uint  wcount_;            // total bytes that have been written (wraps)
-    std::atomic_uint  rcount_;            // total bytes that have been read (wraps)
+    buffer              buffer_;            // ring buffer to store packets off the wire
+    size_t              capacity_;          // total usable buffer capacity
+    std::atomic_size_t  wcount_;            // total bytes that have been written (wraps)
+    std::atomic_size_t  rcount_;            // total bytes that have been read (wraps)
 
-    message_type      cur_type_;          // type of currently dequeued message (awaiting decode)
-    size_t            cur_size_;          // size of currently dequeued message
+    message_type        cur_type_;          // type of currently dequeued message (awaiting decode)
+    size_t              cur_size_;          // size of currently dequeued message
   };
 
   /// Write a list of rapic scans as an ODIM_H5 polar volume file
