@@ -600,8 +600,8 @@ namespace rapic
     private:
       size_t                      capacity_;          // total usable buffer capacity
       std::unique_ptr<uint8_t[]>  data_;              // ring buffer to store packets off the wire
-      std::atomic_uint            wcount_;            // total bytes that have been written (wraps)
-      std::atomic_uint            rcount_;            // total bytes that have been read (wraps)
+      std::atomic_size_t          wcount_;            // total bytes that have been written (wraps)
+      std::atomic_size_t          rcount_;            // total bytes that have been read (wraps)
     };
     using filter_store = std::vector<std::string>;
 

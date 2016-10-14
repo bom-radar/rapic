@@ -524,7 +524,7 @@ auto filter::encode(uint8_t* out, size_t size) const -> size_t
 auto filter::decode(uint8_t const* in, size_t size) -> size_t
 try
 {
-  char str_stn[21], str_stype[21], str_src[21], str_dtype[128];
+  char str_stn[21], str_stype[21], str_src[21], str_dtype[256];
   size_t pos = 0, end = 0;
 
   str_src[0] = '\0';
@@ -532,7 +532,7 @@ try
   // read the header
   auto ret = sscanf(
         reinterpret_cast<char const*>(in)
-      , "RPFILTER:%20[^:]:%20[^:]:%d:%20[^:]:%127s%zn"
+      , "RPFILTER:%20[^:]:%20[^:]:%d:%20[^:]:%255s%zn"
       , str_stn
       , str_stype
       , &video_res_
@@ -982,8 +982,8 @@ client::buffer::buffer(size_t capacity)
 client::buffer::buffer(buffer&& rhs) noexcept
   : capacity_{rhs.capacity_}
   , data_{std::move(rhs.data_)}
-  , wcount_{static_cast<unsigned int>(rhs.wcount_)}
-  , rcount_{static_cast<unsigned int>(rhs.rcount_)}
+  , wcount_{rhs.wcount_.load()}
+  , rcount_{rhs.rcount_.load()}
 { }
 
 inline auto client::buffer::clear() -> void
@@ -999,8 +999,8 @@ inline auto client::buffer::full() const -> bool
 
 inline auto client::buffer::write_acquire() -> std::pair<uint8_t*, size_t>
 {
-  unsigned int rc = rcount_;
-  unsigned int wc = wcount_;
+  auto rc = rcount_.load();
+  auto wc = wcount_.load();
 
   // is the buffer full?
   if (wc - rc >= capacity_)
@@ -1022,8 +1022,8 @@ inline auto client::buffer::write_commit(size_t size) -> void
 
 inline auto client::buffer::read_acquire(size_t offset) -> std::pair<uint8_t const*, size_t>
 {
-  unsigned int rc = rcount_ + offset;
-  unsigned int wc = wcount_;
+  auto rc = rcount_.load() + offset;
+  auto wc = wcount_.load();
 
   // is the buffer empty?
   if (rc >= wc)
@@ -1058,8 +1058,8 @@ auto client::buffer::read_ignore_whitespace() -> void
 auto client::buffer::read_starts_with(std::string const& str) const -> bool
 {
   // cache rcount_ to reduce performance drop of atomic reads
-  size_t rc = rcount_;
-  size_t size = wcount_ - rc;
+  auto rc = rcount_.load();
+  auto size = wcount_.load() - rc;
 
   // is there even enough data in the buffer?
   if (size < str.size())
@@ -1076,8 +1076,8 @@ auto client::buffer::read_starts_with(std::string const& str) const -> bool
 auto client::buffer::read_find(std::string const& str, size_t& offset) const -> bool
 {
   // cache rcount_ to reduce performance drop of atomic reads
-  size_t rc = rcount_;
-  size_t size = wcount_ - rc;
+  auto rc = rcount_.load();
+  auto size = wcount_.load() - rc;
 
   // is there even enough data in the buffer?
   if (size < str.size())
@@ -1101,8 +1101,8 @@ next_i:
 auto client::buffer::read_find_eol(size_t& offset) const -> bool
 {
   // cache rcount_ to reduce performance drop of atomic reads
-  size_t rc = rcount_;
-  size_t size = wcount_ - rc;
+  auto rc = rcount_.load();
+  auto size = wcount_.load() - rc;
 
   for (size_t i = 0; i < size; ++i)
   {
