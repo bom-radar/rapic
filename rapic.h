@@ -76,6 +76,58 @@ namespace rapic
     decode_error(message_type type, uint8_t const* in, size_t size);
   };
 
+  /// Buffer for raw message data
+  class buffer
+  {
+  public:
+    /// Construct a buffer of the given size
+    buffer(size_t size);
+
+    /// Get the total size of the buffer
+    auto size() const -> size_t;
+
+    /// Clear any unread contents in the buffer
+    auto clear() -> void;
+
+    /// Change the buffer capacity
+    /** If the size changed then the underlying buffer memory will be reallocated.  Unlike std::vector, this
+     *  reallocation will occur even if the size is reduced. */
+    auto resize(size_t size) -> void;
+
+    /// Shift unread data to the front of the buffer
+    auto optimize() -> void;
+
+    /// Get a pointer to the write position of the buffer and the amount of contiguous space available for writing
+    auto write_acquire(size_t min_space = 0) -> std::pair<uint8_t*, size_t>;
+
+    /// Advance the write position after having written len bytes into the pointer returned by write_acquire()
+    auto write_commit(size_t len) -> void;
+
+    /// Get a pointer to the read position of the buffer and the amount of contiguous space available for reading
+    auto read_acquire() const -> std::pair<uint8_t const*, size_t>;
+
+    /// Advance the read position after having read len bytes from the pointer returned by read_acquire()
+    auto read_commit(size_t len) -> void;
+
+    /// Skip whitespace at the start of the buffer content
+    auto read_skip_whitespace() -> void;
+
+    /// Determine whether the buffer contents starts with a given string
+    auto read_starts_with(std::string const& str) const -> bool;
+
+    /// Find a string within the buffer contents and determine its offset from the read position
+    auto read_find(std::string const& str, size_t& offset) const -> bool;
+
+    /// Find the first end of line character within the buffer contents and determine its offset from the read position
+    auto read_find_eol(size_t& offset) const -> bool;
+
+  private:
+    size_t                      size_;
+    std::unique_ptr<uint8_t[]>  data_;
+    size_t                      wpos_;
+    size_t                      rpos_;
+  };
+
   /// Abstract base class for message types
   class message
   {
@@ -470,23 +522,13 @@ namespace rapic
    *
    * For asynchronous usage, the user should use the pollable_fd(), poll_read() and poll_write() functions to
    * setup the appropriate multiplexed polling function for their application.
-   *
-   * It is also safe to use this class in a multi-threaded environment where one thread manages the communications
-   * and another thread handles the incoming messages.  In such a setup thread safety is contingent on the following
-   * conditions:
-   *  - Communications is handled by a single thread which calls process_traffic()
-   *  - Message processing is handled by a single thread which calls dequeue() and decode()
-   *  - The connect() function must not be called at the same time as any other member function
-   *
-   * The const member functions may be called safely from any thread at any time.  It is suggested that the poll
-   * functions be called from the communications thread, while the syncrhonized function be called from the 
-   * message handler thread for maximum consistency.
    */
   class client
   {
   public:
     /// Construct a new connection
-    client(size_t buffer_size = 10 * 1024 * 1024, time_t keepalive_period = 40);
+    //client(size_t buffer_size = 10 * 1024 * 1024, time_t keepalive_period = 40);
+    client(size_t buffer_size = 1024, time_t keepalive_period = 40);
 
     client(client const&) = delete;
     auto operator=(client const&) -> client& = delete;
@@ -566,43 +608,6 @@ namespace rapic
     auto decode(message& msg) -> void;
 
   private:
-    class buffer
-    {
-    public:
-      buffer(size_t capacity);
-      buffer(buffer&& rhs) noexcept;
-
-      // reset the buffer to an empty state
-      auto clear() -> void;
-
-      // is the buffer full?
-      auto full() const -> bool;
-
-      // get a pointer to the write position and the amount of contiguous space available for writing
-      auto write_acquire() -> std::pair<uint8_t*, size_t>;
-      // commit data which has been written to the pointer returned by write_acquire
-      auto write_commit(size_t size) -> void;
-
-      // get a pointer to the read position and the amount of contiguous space available for reading
-      auto read_acquire(size_t offset = 0) -> std::pair<uint8_t const*, size_t>;
-      // advance the read position by the set amount
-      auto read_commit(size_t size) -> void;
-
-      // advance the read position past whitespace
-      auto read_ignore_whitespace() -> void;
-      // check if buffer starts with given string
-      auto read_starts_with(std::string const& str) const -> bool;
-      // check if buffer contains given string and store its offset from current read position
-      auto read_find(std::string const& str, size_t& offset) const -> bool;
-      // check if buffer contains an end of line character and store its offset from current read position
-      auto read_find_eol(size_t& offset) const -> bool;
-
-    private:
-      size_t                      capacity_;          // total usable buffer capacity
-      std::unique_ptr<uint8_t[]>  data_;              // ring buffer to store packets off the wire
-      std::atomic_size_t          wcount_;            // total bytes that have been written (wraps)
-      std::atomic_size_t          rcount_;            // total bytes that have been read (wraps)
-    };
     using filter_store = std::vector<std::string>;
 
   private:

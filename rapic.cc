@@ -123,7 +123,7 @@ constexpr lookup_value lookup[] =
 };
 
 // find the next text within a line, or the end of line
-static auto find_text(uint8_t const* in, size_t size, size_t& pos) -> size_t
+static auto find_text(uint8_t const* in, size_t size, size_t pos) -> size_t
 {
   for (size_t i = pos; i < size; ++i)
   {
@@ -135,8 +135,9 @@ static auto find_text(uint8_t const* in, size_t size, size_t& pos) -> size_t
   throw std::runtime_error{"unterminated message"};
 }
 
+#if 0
 // find the next whitespace within a line, or the end of line
-static auto find_white(uint8_t const* in, size_t size, size_t& pos) -> size_t
+static auto find_white(uint8_t const* in, size_t size, size_t pos) -> size_t
 {
   for (size_t i = pos; i < size; ++i)
   {
@@ -147,6 +148,7 @@ static auto find_white(uint8_t const* in, size_t size, size_t& pos) -> size_t
   }
   throw std::runtime_error{"unterminated message"};
 }
+#endif
 
 // find the end of the line
 static auto find_eol(uint8_t const* in, size_t size, size_t pos) -> size_t
@@ -208,7 +210,7 @@ static auto parse_scan_type(char const* in) -> std::pair<scan_type, int>
   throw std::runtime_error{"invalid scan type id"};
 }
 
-auto parse_query_type(char const* in) -> query_type
+static auto parse_query_type(char const* in) -> query_type
 {
   if (strcasecmp(in, "LATEST") == 0)
     return query_type::latest;
@@ -222,7 +224,7 @@ auto parse_query_type(char const* in) -> query_type
   throw std::runtime_error{"invalid query type"};
 }
 
-auto parse_data_types(char const* in) -> std::vector<std::string>
+static auto parse_data_types(char const* in) -> std::vector<std::string>
 {
   std::vector<std::string> ret;
   size_t pos = 0, end = 0;
@@ -271,7 +273,137 @@ auto socket_handle::release() -> int
 
 decode_error::decode_error(message_type type, uint8_t const* in, size_t size)
   : std::runtime_error{"TODO"}
+{ }
+
+buffer::buffer(size_t size)
+  : size_{size}
+  , data_{new uint8_t[size_]}
+  , wpos_{0}
+  , rpos_{0}
+{ }
+
+auto buffer::resize(size_t size) -> void
 {
+  if (size < wpos_ - rpos_)
+    throw std::logic_error{"rapic buffer resize would corrupt data stream"};
+
+  if (size == size_)
+    return;
+
+  auto tmp = std::unique_ptr<uint8_t[]>{new uint8_t[size]};
+  for (size_t i = 0; i < wpos_ - rpos_; ++i)
+    tmp[i] = data_[rpos_ + i];
+
+  size_ = size;
+  data_ = std::move(tmp);
+  wpos_ -= rpos_;
+  rpos_ = 0;
+}
+
+auto buffer::optimize() -> void
+{
+  for (size_t i = 0; i < wpos_ - rpos_; ++i)
+    data_[i] = data_[rpos_ + i];
+  wpos_ -= rpos_;
+  rpos_ = 0;
+}
+
+auto buffer::clear() -> void
+{
+  wpos_ = 0;
+  rpos_ = 0;
+}
+
+auto buffer::write_acquire(size_t min_space) -> std::pair<uint8_t*, size_t>
+{
+  // expand or shuffle to ensure min_space requirement is met
+  auto space = size_ - wpos_;
+  if (space < min_space)
+  {
+    if (space + rpos_ < min_space)
+      resize(size_ * 2);
+    else
+      optimize();
+    space = size_ - wpos_;
+  }
+  /* if min_space is 0 and wpos_ hits the end then force a shuffle.  without this fixed size buffers (i.e. those
+   * for which the user always specifies min_space == 0) which hit the fill point part way through a message will
+   * never have a chance to clear themselves because they will never perform a read_commit(). */
+  else if (space == 0)
+    optimize();
+  return {&data_[wpos_], space};
+}
+
+auto buffer::write_commit(size_t len) -> void
+{
+  wpos_ += len;
+  if (wpos_ > size_)
+    throw std::out_of_range{"rapic buffer overflow detected on write operation"};
+}
+
+auto buffer::read_acquire() const -> std::pair<uint8_t const*, size_t>
+{
+  return {&data_[rpos_], wpos_ - rpos_};
+}
+
+auto buffer::read_commit(size_t len) -> void
+{
+  rpos_ += len;
+  if (wpos_ > size_)
+    throw std::out_of_range{"rapic buffer overflow detected on read operation"};
+  if (rpos_ == wpos_)
+    rpos_ = wpos_ = 0;
+}
+
+auto buffer::read_skip_whitespace() -> void
+{
+  while (rpos_ < wpos_ && data_[rpos_] <= 0x20)
+    ++rpos_;
+  if (rpos_ == wpos_)
+    rpos_ = wpos_ = 0;
+}
+
+auto buffer::read_starts_with(std::string const& str) const -> bool
+{
+  if (wpos_ - rpos_ < str.size())
+    return false;
+  for (size_t i = 0; i < str.size(); ++i)
+    if (data_[rpos_ + i] != str[i])
+      return false;
+  return true;
+}
+
+auto buffer::read_find(std::string const& str, size_t& offset) const -> bool
+{
+  if (wpos_ - rpos_ < str.size())
+    return false;
+
+  // note the exceedinly rare (only?) legitimate use of goto! (continue/break outer loop without extra branch)
+  // if C++ would introduce the sorely needed 'break x / continue x' this would not be required
+  for (size_t i = rpos_; i < wpos_ - str.size() + 1; ++i)
+  {
+    for (size_t j = 0; j < str.size(); ++j)
+      if (data_[i + j] != str[j])
+        goto next_i;
+    offset = i - rpos_;
+    return true;
+  next_i:
+    ;
+  }
+  return false;
+}
+
+auto buffer::read_find_eol(size_t& offset) const -> bool
+{
+  for (size_t i = rpos_; i < wpos_; ++i)
+  {
+    if (data_[i] == '\n' || data_[i] == '\r')
+    {
+      offset = i - rpos_;
+      return true;
+    }
+  }
+  return false;
 }
 
 message::~message()
@@ -304,11 +436,13 @@ auto mssg::encode(uint8_t* out, size_t size) const -> size_t
 auto mssg::decode(uint8_t const* in, size_t size) -> size_t
 try
 {
-  size_t pos = 0, end = 0;
+  size_t pos, end;
 
   // read the message identifier and number
-  if (sscanf(reinterpret_cast<char const*>(in), "MSSG: %d%zn", &number_, &pos) != 1 || pos == 0)
+  ssize_t spos = 0;
+  if (sscanf(reinterpret_cast<char const*>(in), "MSSG: %d%zn", &number_, &spos) != 1 || spos == 0)
     throw std::runtime_error{"failed to parse message header"};
+  pos = spos;
 
   // remainder of line is the message text
   pos = find_text(in, size, pos);
@@ -359,11 +493,13 @@ auto status::encode(uint8_t* out, size_t size) const -> size_t
 auto status::decode(uint8_t const* in, size_t size) -> size_t
 try
 {
-  size_t pos = 0, end = 0;
+  size_t pos, end;
 
   // read the header
-  if (sscanf(reinterpret_cast<char const*>(in), "RDRSTAT:%zn", &pos) != 0 || pos == 0)
+  ssize_t spos = 0;
+  if (sscanf(reinterpret_cast<char const*>(in), "RDRSTAT:%zn", &spos) != 0 || spos == 0)
     throw std::runtime_error{"failed to parse message header"};
+  pos = spos;
 
   // remainder of line is the message text
   pos = find_text(in, size, pos);
@@ -405,16 +541,18 @@ auto permcon::decode(uint8_t const* in, size_t size) -> size_t
 try
 {
   int ival;
-  size_t pos = 0, end = 0;
+  size_t pos, end;
 
   // read the header
+  ssize_t spos = 0;
   auto ret = sscanf(
         reinterpret_cast<char const*>(in)
       , "RPQUERY: SEMIPERMANENT CONNECTION - SEND ALL DATA TXCOMPLETESCANS=%d%zn"
       , &ival
-      , &pos);
-  if (ret != 1)
+      , &spos);
+  if (ret != 1 || spos == 0)
     throw std::runtime_error{"failed to parse message header"};
+  pos = spos;
 
   // find the end of the line
   end = find_eol(in, size, pos);
@@ -460,9 +598,10 @@ try
 {
   long time;
   char str_stn[21], str_stype[21], str_qtype[21], str_dtype[128];
-  size_t pos = 0, end = 0;
+  size_t pos, end;
 
   // read the header
+  ssize_t spos = 0;
   auto ret = sscanf(
         reinterpret_cast<char const*>(in)
       , "RPQUERY: %20s %20s %f %d %20s %ld %127s %d%zn"
@@ -474,9 +613,10 @@ try
       , &time
       , str_dtype
       , &video_res_
-      , &pos);
-  if (ret != 7)
+      , &spos);
+  if (ret != 7 || spos == 0)
     throw std::runtime_error{"corrupt message detected"};
+  pos = spos;
 
   // check/parse the individual tokens
   station_id_ = parse_station_id(str_stn);
@@ -525,11 +665,12 @@ auto filter::decode(uint8_t const* in, size_t size) -> size_t
 try
 {
   char str_stn[21], str_stype[21], str_src[21], str_dtype[256];
-  size_t pos = 0, end = 0;
+  size_t pos, end;
 
   str_src[0] = '\0';
 
   // read the header
+  ssize_t spos = 0;
   auto ret = sscanf(
         reinterpret_cast<char const*>(in)
       , "RPFILTER:%20[^:]:%20[^:]:%d:%20[^:]:%255s%zn"
@@ -538,9 +679,10 @@ try
       , &video_res_
       , str_src
       , str_dtype
-      , &pos);
-  if (ret != 5)
+      , &spos);
+  if (ret != 5 || spos == 0)
     throw std::runtime_error{"corrupt message detected"};
+  pos = spos;
 
   // check/parse the individual tokens
   station_id_ = parse_station_id(str_stn);
@@ -972,150 +1114,6 @@ auto scan::initialize_rays() -> void
   level_data_.resize(rays_ * bins_);
 }
 
-client::buffer::buffer(size_t capacity)
-  : capacity_{capacity}
-  , data_{new uint8_t[capacity_]}
-  , wcount_{0}
-  , rcount_{0}
-{ }
-
-client::buffer::buffer(buffer&& rhs) noexcept
-  : capacity_{rhs.capacity_}
-  , data_{std::move(rhs.data_)}
-  , wcount_{rhs.wcount_.load()}
-  , rcount_{rhs.rcount_.load()}
-{ }
-
-inline auto client::buffer::clear() -> void
-{
-  wcount_ = 0;
-  rcount_ = 0;
-}
-
-inline auto client::buffer::full() const -> bool
-{
-  return wcount_ - rcount_ == capacity_;
-}
-
-inline auto client::buffer::write_acquire() -> std::pair<uint8_t*, size_t>
-{
-  auto rc = rcount_.load();
-  auto wc = wcount_.load();
-
-  // is the buffer full?
-  if (wc - rc >= capacity_)
-    return { nullptr, 0 };
-
-  // determine current read and write positions
-  auto rpos = rc % capacity_;
-  auto wpos = wc % capacity_;
-
-  // see how much _contiguous_ space is left in our buffer (may be less than total available write space)
-  // this does not distinguish between full and empty, hence the explicit check above
-  return { &data_[wpos], wpos < rpos ? rpos - wpos : capacity_ - wpos };
-}
-
-inline auto client::buffer::write_commit(size_t size) -> void
-{
-  wcount_ += size;
-}
-
-inline auto client::buffer::read_acquire(size_t offset) -> std::pair<uint8_t const*, size_t>
-{
-  auto rc = rcount_.load() + offset;
-  auto wc = wcount_.load();
-
-  // is the buffer empty?
-  if (rc >= wc)
-    return { nullptr, 0 };
-
-  // determine current read and write positions
-  auto rpos = rc % capacity_;
-  auto wpos = wc % capacity_;
-
-  // see how much _contiguous_ space is left in our buffer (may be less than total available read
-  // this does not distinguish between full and empty, hence the explicit check above
-  return { &data_[rpos], rpos < wpos ? wpos - rpos : capacity_ - rpos };
-}
-
-inline auto client::buffer::read_commit(size_t size) -> void
-{
-  rcount_ += size;
-}
-
-auto client::buffer::read_ignore_whitespace() -> void
-{
-  while (true)
-  {
-    if (wcount_ == rcount_)
-      return;
-    if (data_[rcount_ % capacity_] > 0x20)
-      break;
-    ++rcount_;
-  }
-}
-
-auto client::buffer::read_starts_with(std::string const& str) const -> bool
-{
-  // cache rcount_ to reduce performance drop of atomic reads
-  auto rc = rcount_.load();
-  auto size = wcount_.load() - rc;
-
-  // is there even enough data in the buffer?
-  if (size < str.size())
-    return false;
-
-  // check each character for a match
-  for (size_t i = 0; i < str.size(); ++i)
-    if (str[i] != data_[(rc + i) % capacity_])
-      return false;
-
-  return true;
-}
-
-auto client::buffer::read_find(std::string const& str, size_t& offset) const -> bool
-{
-  // cache rcount_ to reduce performance drop of atomic reads
-  auto rc = rcount_.load();
-  auto size = wcount_.load() - rc;
-
-  // is there even enough data in the buffer?
-  if (size < str.size())
-    return false;
-
-  // naive search through the buffer
-  for (size_t i = 0; i < size - (str.size() - 1); ++i)
-  {
-    for (size_t j = 0; j < str.size(); ++j)
-      if (str[j] != data_[(rc + i + j) % capacity_])
-        goto next_i;
-    offset = i;
-    return true;
-next_i:
-    ;
-  }
-
-  return false;
-}
-
-auto client::buffer::read_find_eol(size_t& offset) const -> bool
-{
-  // cache rcount_ to reduce performance drop of atomic reads
-  auto rc = rcount_.load();
-  auto size = wcount_.load() - rc;
-
-  for (size_t i = 0; i < size; ++i)
-  {
-    if (   data_[(rc + i) % capacity_] == '\n'
-        || data_[(rc + i) % capacity_] == '\r')
-    {
-      offset = i;
-      return true;
-    }
-  }
-  return false;
-}
-
 client::client(size_t buffer_size, time_t keepalive_period)
   : keepalive_period_{keepalive_period}
   , establish_wait_{false}
@@ -1331,21 +1329,25 @@ auto client::process_traffic() -> bool
   // read everything we can
   while (true)
   {
-    auto space = rbuf_.write_acquire();
+    // TODO - we can provide a 'min_space' here to automatically grow the buffer as needed, but then
+    //        we should implement a maximum buffer size restriction
+    // TODO - make the fixed size or growable buffer behaviour use customizable
+    //      - if buffer_size is 0 then make it grow automatically, if not use a fixed buffer...
+    auto wa = rbuf_.write_acquire(512);
 
     // if our buffer is full return and allow the client to do some reading
-    if (space.second == 0)
+    if (wa.second == 0)
       return true;
 
     // read some data off the wire
-    auto bytes = recv(socket_, space.first, space.second, 0);
+    auto bytes = recv(socket_, wa.first, wa.second, 0);
     if (bytes > 0)
     {
       // commit the read bytes to the buffer
       rbuf_.write_commit(bytes);
 
       // if we read as much as we asked for there may be more still waiting so return true
-      return static_cast<size_t>(bytes) == space.second;
+      return static_cast<size_t>(bytes) == wa.second;
     }
     else if (bytes < 0)
     {
@@ -1396,10 +1398,7 @@ auto client::dequeue(message_type& type) -> bool
   }
 
   // ignore leading whitespace (and return if no data at all)
-  rbuf_.read_ignore_whitespace();
-
-  // check fullness for overflow check at the end of this function (must be before dequeuing anything)
-  auto full = rbuf_.full();
+  rbuf_.read_skip_whitespace();
 
   // is it an MSSG style message?
   if (rbuf_.read_starts_with(msg_mssg_head))
@@ -1476,10 +1475,6 @@ auto client::dequeue(message_type& type) -> bool
     }
   }
 
-  // if the buffer was full when entering but we could not read a message then we are in overflow, fail hard
-  if (full)
-    throw std::runtime_error{"rapic: buffer overflow (try increasing buffer size)"};
-
   return false;
 }
 
@@ -1496,23 +1491,17 @@ auto client::decode(message& msg) -> void
 
   try
   {
-    // if the message spans the buffer wrap around point, copy it into a temporary location to ease parsing
-    auto space = rbuf_.read_acquire();
-    if (space.second < cur_size_)
-    {
-      std::unique_ptr<uint8_t[]> buf{new uint8_t[cur_size_]};
-      std::memcpy(buf.get(), space.first, space.second);
-      std::memcpy(buf.get() + space.second, rbuf_.read_acquire(space.second).first, cur_size_ - space.second);
-      msg.decode(buf.get(), cur_size_);
-    }
-    else
-      msg.decode(space.first, cur_size_);
+    auto ra = rbuf_.read_acquire();
+    if (ra.second < cur_size_)
+      throw std::runtime_error{"rapic: read buffer underflow"};
+    msg.decode(ra.first, cur_size_);
   }
   catch (...)
   {
     rbuf_.read_commit(cur_size_);
     cur_type_ = no_message;
     cur_size_ = 0;
+    throw;
   }
 
   rbuf_.read_commit(cur_size_);
