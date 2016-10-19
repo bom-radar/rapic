@@ -463,12 +463,18 @@ auto mssg::reset() -> void
   text_.clear();
 }
 
-auto mssg::encode(uint8_t* out, size_t size) const -> size_t
+auto mssg::encode(buffer& out) const -> void
 {
-  if (number_ == 30)
-    return snprintf(reinterpret_cast<char*>(out), size, "MSSG: 30 %s\nEND STATUS\n", text_.c_str());
-  else
-    return snprintf(reinterpret_cast<char*>(out), size, "MSSG: %d %s\n", number_, text_.c_str());
+  auto wa = out.write_acquire(text_.size() + 32);
+  auto ret = snprintf(
+        reinterpret_cast<char*>(wa.first)
+      , wa.second
+      , number_ == 30 ? "MSSG: %d %s\nEND STATUS\n" : "MSSG: %d %s\n"
+      , number_
+      , text_.c_str());
+  if (ret < 0 || ret >= wa.second)
+    throw std::runtime_error{"rapic: failed to encode message"};
+  out.write_advance(ret);
 }
 
 auto mssg::decode(uint8_t const* in, size_t size) -> size_t
@@ -523,9 +529,13 @@ auto status::reset() -> void
   text_.clear();
 }
 
-auto status::encode(uint8_t* out, size_t size) const -> size_t
+auto status::encode(buffer& out) const -> void
 {
-  return snprintf(reinterpret_cast<char*>(out), size, "RDRSTAT: %s\n", text_.c_str());
+  auto wa = out.write_acquire(text_.size() + 16);
+  auto ret = snprintf(reinterpret_cast<char*>(wa.first), wa.second, "RDRSTAT: %s\n", text_.c_str());
+  if (ret < 0 || ret >= wa.second)
+    throw std::runtime_error{"rapic: failed to encode message"};
+  out.write_advance(ret);
 }
 
 auto status::decode(uint8_t const* in, size_t size) -> size_t
@@ -566,13 +576,17 @@ auto permcon::reset() -> void
   tx_complete_scans_ = false;
 }
 
-auto permcon::encode(uint8_t* out, size_t size) const -> size_t
+auto permcon::encode(buffer& out) const -> void
 {
-  return snprintf(
-        reinterpret_cast<char*>(out)
-      , size
+  auto wa = out.write_acquire(96);
+  auto ret = snprintf(
+        reinterpret_cast<char*>(wa.first)
+      , wa.second
       , "RPQUERY: SEMIPERMANENT CONNECTION - SEND ALL DATA TXCOMPLETESCANS=%d\n"
       , tx_complete_scans_);
+  if (ret < 0 || ret >= wa.second)
+    throw std::runtime_error{"rapic: failed to encode message"};
+  out.write_advance(ret);
 }
 
 auto permcon::decode(uint8_t const* in, size_t size) -> size_t
@@ -625,10 +639,9 @@ auto query::reset() -> void
   video_res_ = -1;
 }
 
-auto query::encode(uint8_t* out, size_t size) const -> size_t
+auto query::encode(buffer& out) const -> void
 {
   // TODO
-  return 0;
 }
 
 auto query::decode(uint8_t const* in, size_t size) -> size_t
@@ -693,10 +706,9 @@ auto filter::reset() -> void
   data_types_.clear();
 }
 
-auto filter::encode(uint8_t* out, size_t size) const -> size_t
+auto filter::encode(buffer& out) const -> void
 {
   // TODO
-  return 0;
 }
 
 auto filter::decode(uint8_t const* in, size_t size) -> size_t
@@ -848,10 +860,9 @@ auto scan::reset() -> void
   angle_resolution_ = fnan;
 }
 
-auto scan::encode(uint8_t* out, size_t size) const -> size_t
+auto scan::encode(buffer& out) const -> void
 {
   // TODO
-  return 0;
 }
 
 auto scan::decode(uint8_t const* in, size_t size) -> size_t
