@@ -44,23 +44,12 @@ static const std::string msg_connect{"RPQUERY: SEMIPERMANENT CONNECTION - SEND A
 static const std::string msg_keepalive{"RDRSTAT:\n"};
 
 static const std::string msg_mssg_head{"MSSG:"};
-static const std::string msg_mssg_term{"\n"};
-
 static const std::string msg_mssg30_head{"MSSG: 30"};
-static const std::string msg_mssg30_term{"\nEND STATUS\n"};
-
+static const std::string msg_mssg30_term{"\nEND STATUS"};
 static const std::string msg_status_head{"RDRSTAT:"};
-static const std::string msg_status_term{"\n"};
-
 static const std::string msg_permcon_head{"RPQUERY: SEMIPERMANENT CONNECTION"};
-static const std::string msg_permcon_term{"\n"};
-
 static const std::string msg_query_head{"RPQUERY:"};
-static const std::string msg_query_term{"\n"};
-
 static const std::string msg_filter_head{"RPFILTER:"};
-static const std::string msg_filter_term{"\n"};
-
 static const std::string msg_scan_term{"END RADAR IMAGE"};
 
 // this table translates the ASCII encoding absolute, RLE digits and delta lookups
@@ -122,6 +111,40 @@ constexpr lookup_value lookup[] =
   lval(152),  lval(153),   lval(154),   lval(155),   lval(156),   lval(157),   lval(158),   lval(159)    // f8-ff
 };
 
+static auto find_non_whitespace(uint8_t const* begin, uint8_t const* end) -> uint8_t const*
+{
+  while (begin != end && *begin <= 0x20)
+    ++begin;
+  return begin;
+}
+
+static auto starts_with(uint8_t const* begin, uint8_t const* end, std::string const& str) -> bool
+{
+  auto b2 = str.c_str(), e2 = str.c_str() + str.size();
+  while (begin != end && b2 != e2 && *begin == *b2)
+  {
+    ++begin;
+    ++b2;
+  }
+  return b2 == e2;
+}
+
+static auto find_string(uint8_t const* begin, uint8_t const* end, std::string const& str) -> uint8_t const*
+{
+  while (begin != end && !starts_with(begin, end, str))
+    ++begin;
+  return begin;
+}
+
+static auto find_eol(uint8_t const* begin, uint8_t const* end) -> uint8_t const*
+{
+  while (begin != end && *begin != '\n' && *begin != '\r' && *begin != '\0')
+    ++begin;
+  return begin;
+}
+
+// -------------------
+
 // find the next text within a line, or the end of line
 static auto find_text(uint8_t const* in, size_t size, size_t pos) -> size_t
 {
@@ -134,21 +157,6 @@ static auto find_text(uint8_t const* in, size_t size, size_t pos) -> size_t
   }
   throw std::runtime_error{"unterminated message"};
 }
-
-#if 0
-// find the next whitespace within a line, or the end of line
-static auto find_white(uint8_t const* in, size_t size, size_t pos) -> size_t
-{
-  for (size_t i = pos; i < size; ++i)
-  {
-    if (in[i] == '\0' || in[i] == '\n')
-      return i;
-    if (std::isspace(in[i]))
-      return i;
-  }
-  throw std::runtime_error{"unterminated message"};
-}
-#endif
 
 // find the end of the line
 static auto find_eol(uint8_t const* in, size_t size, size_t pos) -> size_t
@@ -275,11 +283,12 @@ decode_error::decode_error(message_type type, uint8_t const* in, size_t size)
   : std::runtime_error{"TODO"}
 { }
 
-buffer::buffer(size_t size)
+buffer::buffer(size_t size, size_t max_size)
   : size_{size}
   , data_{new uint8_t[size_]}
   , wpos_{0}
   , rpos_{0}
+  , max_size_{max_size}
 { }
 
 auto buffer::resize(size_t size) -> void
@@ -320,21 +329,24 @@ auto buffer::write_acquire(size_t min_space) -> std::pair<uint8_t*, size_t>
   auto space = size_ - wpos_;
   if (space < min_space)
   {
+    auto min_size = wpos_ - rpos_ + min_space;
+    if (min_size > max_size_)
+      throw std::runtime_error{"rapic: allocating requested write space would exceed maximum buffer size"};
     if (space + rpos_ < min_space)
-      resize(size_ * 2);
+      resize(std::max(size_ * 2, min_size));
     else
       optimize();
     space = size_ - wpos_;
   }
   /* if min_space is 0 and wpos_ hits the end then force a shuffle.  without this fixed size buffers (i.e. those
    * for which the user always specifies min_space == 0) which hit the fill point part way through a message will
-   * never have a chance to clear themselves because they will never perform a read_commit(). */
+   * never have a chance to clear themselves because they will never perform a read_advance(). */
   else if (space == 0)
     optimize();
   return {&data_[wpos_], space};
 }
 
-auto buffer::write_commit(size_t len) -> void
+auto buffer::write_advance(size_t len) -> void
 {
   wpos_ += len;
   if (wpos_ > size_)
@@ -346,7 +358,7 @@ auto buffer::read_acquire() const -> std::pair<uint8_t const*, size_t>
   return {&data_[rpos_], wpos_ - rpos_};
 }
 
-auto buffer::read_commit(size_t len) -> void
+auto buffer::read_advance(size_t len) -> void
 {
   rpos_ += len;
   if (wpos_ > size_)
@@ -355,55 +367,81 @@ auto buffer::read_commit(size_t len) -> void
     rpos_ = wpos_ = 0;
 }
 
-auto buffer::read_skip_whitespace() -> void
+auto buffer::read_detect(message_type& type, size_t& len) const -> bool
 {
-  while (rpos_ < wpos_ && data_[rpos_] <= 0x20)
-    ++rpos_;
-  if (rpos_ == wpos_)
-    rpos_ = wpos_ = 0;
-}
+  message_type msg = no_message;
+  uint8_t const* pos = &data_[rpos_];
+  uint8_t const* end = &data_[wpos_];
+  uint8_t const* nxt;
 
-auto buffer::read_starts_with(std::string const& str) const -> bool
-{
-  if (wpos_ - rpos_ < str.size())
-    return false;
-  for (size_t i = 0; i < str.size(); ++i)
-    if (data_[rpos_ + i] != str[i])
-      return false;
-  return true;
-}
-
-auto buffer::read_find(std::string const& str, size_t& offset) const -> bool
-{
-  if (wpos_ - rpos_ < str.size())
+  // ignore leading whitespace (and return if no data at all)
+  if ((pos = find_non_whitespace(pos, end)) == end)
     return false;
 
-  // note the exceedinly rare (only?) legitimate use of goto! (continue/break outer loop without extra branch)
-  // if C++ would introduce the sorely needed 'break x / continue x' this would not be required
-  for (size_t i = rpos_; i < wpos_ - str.size() + 1; ++i)
+  // status 30 is multi-line terminated by "END STATUS"
+  // note: must check mssg30 before mssg as mssg header is a subset of mssg30 header
+  if (starts_with(pos, end, msg_mssg30_head))
   {
-    for (size_t j = 0; j < str.size(); ++j)
-      if (data_[i + j] != str[j])
-        goto next_i;
-    offset = i - rpos_;
-    return true;
-  next_i:
-    ;
-  }
-  return false;
-}
-
-auto buffer::read_find_eol(size_t& offset) const -> bool
-{
-  for (size_t i = rpos_; i < wpos_; ++i)
-  {
-    if (data_[i] == '\n' || data_[i] == '\r')
+    if ((nxt = find_string(pos, end, msg_mssg30_term)) != end)
     {
-      offset = i - rpos_;
-      return true;
+      msg = message_type::mssg;
+      nxt += msg_mssg30_term.size();
     }
   }
+  // is it an MSSG style message?
+  else if (starts_with(pos, end, msg_mssg_head))
+  {
+    if ((nxt = find_eol(pos, end)) != end)
+      msg = message_type::mssg;
+  }
+  // is it an RDRSTAT message?
+  else if (starts_with(pos, end, msg_status_head))
+  {
+    if ((nxt = find_eol(pos, end)) != end)
+      msg = message_type::status;
+  }
+  // is it a SEMIPERMANENT CONNECTION message? (must check this before RPQUERY due to header similarity)
+  else if (starts_with(pos, end, msg_permcon_head))
+  {
+    if ((nxt = find_eol(pos, end)) != end)
+      msg = message_type::permcon;
+  }
+  // is it a RPQUERY style message?
+  else if (starts_with(pos, end, msg_query_head))
+  {
+    if ((nxt = find_eol(pos, end)) != end)
+      msg = message_type::query;
+  }
+  // is it an RPFILTER styles message?
+  else if (starts_with(pos, end, msg_filter_head))
+  {
+    if ((nxt = find_eol(pos, end)) != end)
+      msg = message_type::filter;
+  }
+  // otherwise assume it is a scan message and look for "END RADAR IMAGE"
+  else
+  {
+    if ((nxt = find_string(pos, end, msg_scan_term)) != end)
+    {
+      msg = message_type::scan;
+      nxt += msg_scan_term.size();
+    }
+  }
+
+  // did we manage to locate a message?
+  if (msg != no_message)
+  {
+    type = msg;
+    len = nxt + 1 - &data_[rpos_];
+    return true;
+  }
+
   return false;
+}
+
+auto buffer::read_decode(message& msg) const -> void
+{
+  msg.decode(&data_[rpos_], wpos_ - rpos_);
 }
 
 message::~message()
@@ -1114,11 +1152,11 @@ auto scan::initialize_rays() -> void
   level_data_.resize(rays_ * bins_);
 }
 
-client::client(size_t buffer_size, time_t keepalive_period)
+client::client(size_t max_buffer_size, time_t keepalive_period)
   : keepalive_period_{keepalive_period}
   , establish_wait_{false}
   , last_keepalive_{0}
-  , rbuf_{buffer_size}
+  , rbuf_{1024, max_buffer_size}
   , cur_type_{no_message}
   , cur_size_{0}
 { }
@@ -1329,22 +1367,16 @@ auto client::process_traffic() -> bool
   // read everything we can
   while (true)
   {
-    // TODO - we can provide a 'min_space' here to automatically grow the buffer as needed, but then
-    //        we should implement a maximum buffer size restriction
-    // TODO - make the fixed size or growable buffer behaviour use customizable
-    //      - if buffer_size is 0 then make it grow automatically, if not use a fixed buffer...
-    auto wa = rbuf_.write_acquire(512);
-
-    // if our buffer is full return and allow the client to do some reading
-    if (wa.second == 0)
-      return true;
+    /* request minimum of 256 bytes buffer space to read into.  in practice we will normally be returned far more
+     * than this.  if we cannot acquire 256 bytes then an exception will be thrown by the buffer. */
+    auto wa = rbuf_.write_acquire(256);
 
     // read some data off the wire
     auto bytes = recv(socket_, wa.first, wa.second, 0);
     if (bytes > 0)
     {
       // commit the read bytes to the buffer
-      rbuf_.write_commit(bytes);
+      rbuf_.write_advance(bytes);
 
       // if we read as much as we asked for there may be more still waiting so return true
       return static_cast<size_t>(bytes) == wa.second;
@@ -1392,87 +1424,16 @@ auto client::dequeue(message_type& type) -> bool
   // move along to the next packet in the buffer if needed
   if (cur_type_ != no_message)
   {
-    rbuf_.read_commit(cur_size_);
+    rbuf_.read_advance(cur_size_);
     cur_type_ = no_message;
     cur_size_ = 0;
   }
 
-  // ignore leading whitespace (and return if no data at all)
-  rbuf_.read_skip_whitespace();
-
-  // is it an MSSG style message?
-  if (rbuf_.read_starts_with(msg_mssg_head))
+  // detect the next message in the stream
+  if (rbuf_.read_detect(cur_type_, cur_size_))
   {
-    // status 30 is multi-line terminated by "END STATUS"
-    if (rbuf_.read_starts_with(msg_mssg30_head))
-    {
-      if (rbuf_.read_find(msg_mssg30_term, cur_size_))
-      {
-        cur_type_ = type = message_type::mssg;
-        cur_size_ += msg_mssg30_term.size();
-        return true;
-      }
-    }
-    // otherwise assume it is a single line message and look for an end of line
-    else
-    {
-      if (rbuf_.read_find_eol(cur_size_))
-      {
-        cur_type_ = type = message_type::mssg;
-        cur_size_ += msg_mssg_term.size();
-        return true;
-      }
-    }
-  }
-  // is it an RDRSTAT message?
-  else if (rbuf_.read_starts_with(msg_status_head))
-  {
-    if (rbuf_.read_find_eol(cur_size_))
-    {
-      cur_type_ = type = message_type::status;
-      cur_size_ += msg_permcon_term.size();
-      return true;
-    }
-  }
-  // is it a SEMIPERMANENT CONNECTION message? (must check this before RPQUERY due to header similarity)
-  else if (rbuf_.read_starts_with(msg_permcon_head))
-  {
-    if (rbuf_.read_find_eol(cur_size_))
-    {
-      cur_type_ = type = message_type::permcon;
-      cur_size_ += msg_permcon_term.size();
-      return true;
-    }
-  }
-  // is it a RPQUERY style message?
-  else if (rbuf_.read_starts_with(msg_query_head))
-  {
-    if (rbuf_.read_find_eol(cur_size_))
-    {
-      cur_type_ = type = message_type::query;
-      cur_size_ += msg_query_term.size();
-      return true;
-    }
-  }
-  // is it an RPFILTER styles message?
-  else if (rbuf_.read_starts_with(msg_filter_head))
-  {
-    if (rbuf_.read_find_eol(cur_size_))
-    {
-      cur_type_ = type = message_type::filter;
-      cur_size_ += msg_filter_term.size();
-      return true;
-    }
-  }
-  // otherwise assume it is a scan message and look for "END RADAR IMAGE"
-  else
-  {
-    if (rbuf_.read_find(msg_scan_term, cur_size_))
-    {
-      cur_type_ = type = message_type::scan;
-      cur_size_ += msg_scan_term.size();
-      return true;
-    }
+    type = cur_type_;
+    return true;
   }
 
   return false;
@@ -1489,22 +1450,21 @@ auto client::decode(message& msg) -> void
       throw std::runtime_error{"rapic: incorrect type passed for decoding"};
   }
 
+  // we advance the buffer even if an exception is thrown during decoding
+  // this ensures that corrupt messages do not stall the stream
   try
   {
-    auto ra = rbuf_.read_acquire();
-    if (ra.second < cur_size_)
-      throw std::runtime_error{"rapic: read buffer underflow"};
-    msg.decode(ra.first, cur_size_);
+    rbuf_.read_decode(msg);
   }
   catch (...)
   {
-    rbuf_.read_commit(cur_size_);
+    rbuf_.read_advance(cur_size_);
     cur_type_ = no_message;
     cur_size_ = 0;
     throw;
   }
 
-  rbuf_.read_commit(cur_size_);
+  rbuf_.read_advance(cur_size_);
   cur_type_ = no_message;
   cur_size_ = 0;
 }
@@ -1527,24 +1487,24 @@ auto server::listen(std::string service, bool ipv6) -> void
   if (port == 0)
     port = std::atoi(service.c_str());
   if (port == 0)
-    throw std::runtime_error{"unknown or invalid service or port '" + service + "'"};
+    throw std::runtime_error{"rapic: unknown or invalid service or port '" + service + "'"};
 
   // create the listen socket
   socket_.reset(::socket(ipv6 ? AF_INET6 : AF_INET, SOCK_STREAM, 0));
   if (socket_ < 0)
-    throw std::system_error{errno, std::generic_category(), "socket creation failed"};
+    throw std::system_error{errno, std::generic_category(), "rapic: socket creation failed"};
 
   // allow immediate reuse of server socket after failure
   int on = 1;
   if (setsockopt(socket_, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0)
-    throw std::system_error{errno, std::generic_category(), "socket reuse mode set failed"};
+    throw std::system_error{errno, std::generic_category(), "rapic: socket reuse mode set failed"};
 
   if (ipv6)
   {
     // allow connections from ipv4 clients when using an ipv6 socket
     on = 0;
     if (setsockopt(socket_, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof(on)) < 0)
-      throw std::system_error{errno, std::generic_category(), "socket failed to disable ipv6 only"};
+      throw std::system_error{errno, std::generic_category(), "rapic: socket failed to disable ipv6 only"};
 
     // build a local address
     struct sockaddr_in6 addr;
@@ -1555,7 +1515,7 @@ auto server::listen(std::string service, bool ipv6) -> void
 
     // bind the address
     if (bind(socket_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0)
-      throw std::system_error{errno, std::generic_category(), "socket bind failed"};
+      throw std::system_error{errno, std::generic_category(), "rapic: socket bind failed"};
   }
   else
   {
@@ -1568,19 +1528,19 @@ auto server::listen(std::string service, bool ipv6) -> void
 
     // bind the address
     if (bind(socket_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0)
-      throw std::system_error{errno, std::generic_category(), "socket bind failed"};
+      throw std::system_error{errno, std::generic_category(), "rapic: socket bind failed"};
   }
 
   // mark as a passive socket
   if (::listen(socket_, SOMAXCONN) < 0)
-    throw std::system_error{errno, std::generic_category(), "socket listen failed"};
+    throw std::system_error{errno, std::generic_category(), "rapic: socket listen failed"};
 
   // set as a non-blocking socket
   int flags = fcntl(socket_, F_GETFL);
   if (flags == -1)
-    throw std::system_error{errno, std::generic_category(), "failed to read socket flags"};
+    throw std::system_error{errno, std::generic_category(), "rapic: failed to read socket flags"};
   if (fcntl(socket_, F_SETFL, flags | O_NONBLOCK) == -1)
-    throw std::system_error{errno, std::generic_category(), "failed to set socket flags"};
+    throw std::system_error{errno, std::generic_category(), "rapic: failed to set socket flags"};
 }
 
 auto server::release() -> void
@@ -1604,7 +1564,7 @@ auto server::accept_pending_connections(size_t buffer_size, time_t keepalive_per
         continue;
       if (errno == EAGAIN || errno == EWOULDBLOCK)
         break;
-      throw std::system_error{errno, std::generic_category(), "failed to accept socket"};
+      throw std::system_error{errno, std::generic_category(), "rapic: failed to accept socket"};
     }
 
     // convert the address into something readable
@@ -1614,7 +1574,7 @@ auto server::accept_pending_connections(size_t buffer_size, time_t keepalive_per
             , hostbuf, sizeof(hostbuf)
             , servbuf, sizeof(servbuf)
             , NI_NUMERICHOST | NI_NUMERICSERV) != 0)
-      throw std::system_error{errno, std::generic_category(), "getnameinfo failure"};
+      throw std::system_error{errno, std::generic_category(), "rapic: getnameinfo failure"};
 
     // initialize a connection manager to own the connection
     client cli{buffer_size, keepalive_period};

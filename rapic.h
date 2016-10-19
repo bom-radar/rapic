@@ -76,12 +76,14 @@ namespace rapic
     decode_error(message_type type, uint8_t const* in, size_t size);
   };
 
+  class message;
+
   /// Buffer for raw message data
   class buffer
   {
   public:
     /// Construct a buffer of the given size
-    buffer(size_t size);
+    buffer(size_t size, size_t max_size = std::numeric_limits<size_t>::max());
 
     /// Get the total size of the buffer
     auto size() const -> size_t;
@@ -98,39 +100,48 @@ namespace rapic
     auto optimize() -> void;
 
     /// Get a pointer to the write position of the buffer and the amount of contiguous space available for writing
-    auto write_acquire(size_t min_space = 0) -> std::pair<uint8_t*, size_t>;
+    auto write_acquire(size_t min_space) -> std::pair<uint8_t*, size_t>;
 
     /// Advance the write position after having written len bytes into the pointer returned by write_acquire()
-    auto write_commit(size_t len) -> void;
+    auto write_advance(size_t len) -> void;
 
     /// Get a pointer to the read position of the buffer and the amount of contiguous space available for reading
+    /** This function is used to allow direct reading from the buffer.  This can be useful in applications where
+     *  there is no requirement to actually decode the rapic data (such as data logging). */
     auto read_acquire() const -> std::pair<uint8_t const*, size_t>;
 
-    /// Advance the read position after having read len bytes from the pointer returned by read_acquire()
-    auto read_commit(size_t len) -> void;
+    /// Determine whether there is a complete message that can be read from the buffer, its type and length
+    /** This function should be used to detect a message ready for decoding in a buffer.  If a message is ready for
+     *  reading then the function will return true.  At this point the user may choose to decode the message using
+     *  the read_decode() function.  The user must call read_advance() passing in the length which is output from
+     *  this function to advance past the current message to the next message in the buffer.  If read_advance() is
+     *  not called then read_detect() and read_decode() will repeatedly detect and decode the same message. */
+    auto read_detect(message_type& type, size_t& len) const -> bool;
 
-    /// Skip whitespace at the start of the buffer content
-    auto read_skip_whitespace() -> void;
+    /// Decode the message at the front of the buffer
+    /** The user must know for certain that the buffer contains at least one complete rapic protocol message at the
+     *  current read location (leading whitespace will be ignored), and that the type of the message matches the
+     *  concrete type of the message object passed to the function.  The standard method of ensuring these
+     *  preconditions is via the read_detect() function. */
+    auto read_decode(message& msg) const -> void;
 
-    /// Determine whether the buffer contents starts with a given string
-    auto read_starts_with(std::string const& str) const -> bool;
-
-    /// Find a string within the buffer contents and determine its offset from the read position
-    auto read_find(std::string const& str, size_t& offset) const -> bool;
-
-    /// Find the first end of line character within the buffer contents and determine its offset from the read position
-    auto read_find_eol(size_t& offset) const -> bool;
+    /// Advance the read position by len bytes
+    auto read_advance(size_t len) -> void;
 
   private:
     size_t                      size_;
     std::unique_ptr<uint8_t[]>  data_;
     size_t                      wpos_;
     size_t                      rpos_;
+    size_t                      max_size_;
   };
 
   /// Abstract base class for message types
   class message
   {
+  public:
+    static auto detect_type(buffer const& data, message_type& type, size_t& len) -> bool;
+
   public:
     virtual ~message();
 
@@ -527,8 +538,7 @@ namespace rapic
   {
   public:
     /// Construct a new connection
-    //client(size_t buffer_size = 10 * 1024 * 1024, time_t keepalive_period = 40);
-    client(size_t buffer_size = 1024, time_t keepalive_period = 40);
+    client(size_t max_buffer_size = std::numeric_limits<size_t>::max(), time_t keepalive_period = 40);
 
     client(client const&) = delete;
     auto operator=(client const&) -> client& = delete;
