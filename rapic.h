@@ -129,7 +129,7 @@ namespace rapic
      *  reading then the function will return true.  At this point the user may choose to decode the message using
      *  the decode() function of the appropriate concrete messag type.  The user must call read_advance() on the
      *  buffer passing in the length which is output from this function to advance past the current message to the
-     *  next message in the buffer.  If read_advance() is not called then detect() and decode() will repeatedly
+     *  next message in the buffer.  If read_advance() is not called then read_detect() and decode() will repeatedly
      *  detect and decode the same message. */
     auto read_detect(message_type& type, size_t& len) const -> bool;
 
@@ -158,7 +158,8 @@ namespace rapic
 
     /// Decode the message from the wire format
     /** It is the user's responsibility to ensure that the concrete type of the message object matches the encoded
-     *  message currently at the front of the buffer.  This can be ensured using the detect() function. */
+     *  message currently at the front of the buffer.  This would normally be ensured by first calling the
+     *  read_detect() function of the input buffer. */
     virtual auto decode(buffer const& in) -> void = 0;
   };
 
