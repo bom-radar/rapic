@@ -203,13 +203,21 @@ auto handle_rapic_messages(rapic::client& con) -> void
   {
     switch (type)
     {
+    case rapic::message_type::comment:
+      {
+        rapic::comment msg;
+        con.decode(msg);
+        std::cout << "COMMENT"
+          << " text=" << msg.text()
+          << std::endl;
+      }
     case rapic::message_type::mssg:
       {
         rapic::mssg msg;
         con.decode(msg);
-        std::cout << "MESSAGE: "
-          << " number " << msg.number()
-          << " text " << msg.text()
+        std::cout << "MESSAGE"
+          << " number=" << msg.number()
+          << " text=" << msg.text()
           << std::endl;
       }
       break;
@@ -217,15 +225,16 @@ auto handle_rapic_messages(rapic::client& con) -> void
       {
         rapic::status msg;
         con.decode(msg);
-        std::cout << "STATUS: " << std::endl;
+        std::cout << "STATUS"
+          << " text=" << msg.text() << std::endl;
       }
       break;
     case rapic::message_type::permcon:
       {
         rapic::permcon msg;
         con.decode(msg);
-        std::cout << "PERMCON: "
-          << " txcomplete " << (msg.tx_complete_scans() ? "true" : "false")
+        std::cout << "PERMCON"
+          << " txcomplete=" << (msg.tx_complete_scans() ? "true" : "false")
           << std::endl;
       }
       break;
@@ -233,19 +242,19 @@ auto handle_rapic_messages(rapic::client& con) -> void
       {
         rapic::query msg;
         con.decode(msg);
-        std::cout << "QUERY: " << std::endl;
+        std::cout << "QUERY" << std::endl;
       }
       break;
     case rapic::message_type::filter:
       {
         rapic::filter msg;
         con.decode(msg);
-        std::cout << "FILTER: "
-          << " station " << msg.station_id()
-          << " stype " << static_cast<int>(msg.scan_type())
-          << " volid " << msg.volume_id()
-          << " vres " << msg.video_resolution()
-          << " types";
+        std::cout << "FILTER"
+          << " station=" << msg.station_id()
+          << " stype=" << static_cast<int>(msg.scan_type())
+          << " volid=" << msg.volume_id()
+          << " vres=" << msg.video_resolution()
+          << " types=";
         for (auto& type : msg.data_types())
           std::cout << " " << type;
         std::cout << std::endl;
@@ -256,10 +265,10 @@ auto handle_rapic_messages(rapic::client& con) -> void
       {
         rapic::scan msg;
         con.decode(msg);
-        std::cout << "SCAN:"
-          << " stn " << msg.station_id()
-          << " pass " << msg.pass() << "/" << msg.pass_count()
-          << " product " << msg.product()
+        std::cout << "SCAN"
+          << " stn=" << msg.station_id()
+          << " pass=" << msg.pass() << "/" << msg.pass_count()
+          << " product=" << msg.product()
           << std::endl;
       }
       catch (std::exception& err)

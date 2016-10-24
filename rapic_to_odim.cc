@@ -145,34 +145,29 @@ int main(int argc, char* argv[])
     std::list<rapic::scan> scans;
     for (auto ra = buf.read_acquire(); ra.second != 0; ra = buf.read_acquire())
     {
-      // whitespace - skip
-      if (*ra.first <= 0x20)
-      {
-        buf.read_advance(1);
-      }
-      // image header - skip
-      else if (*ra.first == '/')
-      {
-        size_t i = 1;
-        while (i < ra.second && ra.first[i] != '\n')
-          ++i;
-        buf.read_advance(i);
-      }
-      // scan - find end and decode
-      else if (rapic::message::detect(buf, type, msglen))
+      if (buf.read_detect(type, msglen))
       {
         if (type == rapic::message_type::scan)
         {
           scans.emplace_back();
           scans.back().decode(buf);
         }
-        else if (!quiet)
-          std::cout << "unexpected rapic message type encountered" << std::endl;
-
+        else
+        {
+          if (type != rapic::message_type::comment && !quiet)
+            std::cout << "unexpected rapic message type encountered" << std::endl;
+        }
         buf.read_advance(msglen);
       }
       else
-        throw std::runtime_error{"extra unknown data in file"};
+      {
+        // if there are non-whitespace characters remaining then there is trailing data
+        auto pos = ra.first;
+        while (pos != ra.first + ra.second && *pos <= 0x20)
+          ++pos;
+        if (pos != ra.first + ra.second)
+          throw std::runtime_error{"extra unknown data in file"};
+      }
     }
 
     // convert the list of scans into a volume

@@ -43,6 +43,7 @@ static constexpr message_type no_message = static_cast<message_type>(-1);
 static const std::string msg_connect{"RPQUERY: SEMIPERMANENT CONNECTION - SEND ALL DATA TXCOMPLETESCANS=0\n"};
 static const std::string msg_keepalive{"RDRSTAT:\n"};
 
+static const std::string msg_comment_head{"/"};
 static const std::string msg_mssg_head{"MSSG:"};
 static const std::string msg_mssg30_head{"MSSG: 30"};
 static const std::string msg_mssg30_term{"END STATUS"};
@@ -379,21 +380,27 @@ auto buffer::read_advance(size_t len) -> void
     rpos_ = wpos_ = 0;
 }
 
-auto message::detect(buffer const& in, message_type& type, size_t& len) -> bool
+auto buffer::read_detect(message_type& type, size_t& len) const -> bool
 {
-  auto ra = in.read_acquire();
-  auto pos = ra.first, end = ra.first + ra.second;
-  decltype(pos) nxt;
+  uint8_t const* pos = &data_[rpos_];
+  uint8_t const* end = &data_[wpos_];
+  uint8_t const* nxt;
   message_type msg = no_message;
 
   // ignore leading whitespace (and return if no data at all)
   if ((pos = find_non_whitespace(pos, end)) == end)
     return false;
 
-  // status 30 is multi-line terminated by "END STATUS"
-  // note: must check mssg30 before mssg as mssg header is a subset of mssg30 header
-  if (starts_with(pos, end, msg_mssg30_head))
+  // is it a comment (i.e. IMAGE header)?
+  if (starts_with(pos, end, msg_comment_head))
   {
+    if ((nxt = find_eol(pos, end)) != end)
+      msg = message_type::comment;
+  }
+  // is it an MSSG 30 style message? (must check mssg30 before mssg as mssg header is a subset of mssg30 header)
+  else if (starts_with(pos, end, msg_mssg30_head))
+  {
+    // status 30 is multi-line terminated by "END STATUS"
     pos += msg_mssg30_head.size();
     while ((nxt = find_eol(pos, end)) != end)
     {
@@ -459,7 +466,7 @@ auto message::detect(buffer const& in, message_type& type, size_t& len) -> bool
   if (msg != no_message)
   {
     type = msg;
-    len = nxt + 1 - ra.first;
+    len = nxt + 1 - &data_[rpos_];
     return true;
   }
 
@@ -468,6 +475,55 @@ auto message::detect(buffer const& in, message_type& type, size_t& len) -> bool
 
 message::~message()
 { }
+
+comment::comment()
+{
+  reset();
+}
+
+auto comment::type() const -> message_type
+{
+  return message_type::comment;
+}
+
+auto comment::reset() -> void
+{
+  text_.clear();
+}
+
+auto comment::encode(buffer& out) const -> void
+{
+  auto wa = out.write_acquire(text_.size() + 8);
+  auto ret = snprintf(reinterpret_cast<char*>(wa.first), wa.second, "/%s\n", text_.c_str());
+  if (ret < 0 || size_t(ret) >= wa.second)
+    throw std::runtime_error{"rapic: failed to encode message"};
+  out.write_advance(ret);
+}
+
+auto comment::decode(buffer const& in) -> void
+{
+  auto ra = in.read_acquire();
+  auto pos = ra.first, end = ra.first + ra.second;
+
+  // skip leading whitespace
+  if ((pos = find_non_whitespace(pos, end)) == end)
+    throw std::runtime_error{"failed to parse message header"};
+
+  // read the message identifier and number
+  ssize_t len = 0;
+  if (sscanf(reinterpret_cast<char const*>(pos), "/%zn", &len) != 0 || len == 0)
+    throw std::runtime_error{"failed to parse message header"};
+  pos += len;
+  if (pos >= end)
+    throw std::runtime_error{"read buffer overflow"};
+
+  // remainder of line is the message text
+  decltype(pos) eol;
+  if ((eol = find_eol(pos, end)) == end)
+    throw std::runtime_error{"read buffer overflow"};
+  text_.assign(reinterpret_cast<char const*>(pos), eol - pos);
+  pos = eol + 1;
+}
 
 mssg::mssg()
 {
@@ -1488,7 +1544,7 @@ auto client::dequeue(message_type& type) -> bool
   }
 
   // detect the next message in the stream
-  if (message::detect(rbuf_, cur_type_, cur_size_))
+  if (rbuf_.read_detect(cur_type_, cur_size_))
   {
     type = cur_type_;
     return true;

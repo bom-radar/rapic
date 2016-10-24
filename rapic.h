@@ -36,12 +36,13 @@ namespace rapic
   /// Available message types
   enum class message_type
   {
-      mssg      ///< administration message (MSSG)
-    , status    ///< status message (RDRSTAT)
-    , permcon   ///< semipermanent connection message (RPQUERY: SEMIPERMANENT CONNECTION)
-    , query     ///< data request message (RPQUERY)
-    , filter    ///< filter specification message (RPFILTER)
-    , scan      ///< rapic scan message
+      comment   ///< Comment line starting with '/' (used for IMAGE headers in volume files)
+    , mssg      ///< Administration message (MSSG)
+    , status    ///< Status message (RDRSTAT)
+    , permcon   ///< Semipermanent connection message (RPQUERY: SEMIPERMANENT CONNECTION)
+    , query     ///< Data request message (RPQUERY)
+    , filter    ///< Filter specification message (RPFILTER)
+    , scan      ///< Rapic scan message
   };
 
   /// Possible scan types for queries and filters
@@ -123,6 +124,15 @@ namespace rapic
     /// Advance the read position by len bytes
     auto read_advance(size_t len) -> void;
 
+    /// Determine whether there is a complete message that can be read from the buffer, its type and length
+    /** This function should be used to detect a message ready for decoding in a buffer.  If a message is ready for
+     *  reading then the function will return true.  At this point the user may choose to decode the message using
+     *  the decode() function of the appropriate concrete messag type.  The user must call read_advance() on the
+     *  buffer passing in the length which is output from this function to advance past the current message to the
+     *  next message in the buffer.  If read_advance() is not called then detect() and decode() will repeatedly
+     *  detect and decode the same message. */
+    auto read_detect(message_type& type, size_t& len) const -> bool;
+
   private:
     size_t                      size_;
     std::unique_ptr<uint8_t[]>  data_;
@@ -134,16 +144,6 @@ namespace rapic
   /// Abstract base class for message types
   class message
   {
-  public:
-    /// Determine whether there is a complete message that can be read from the buffer, its type and length
-    /** This function should be used to detect a message ready for decoding in a buffer.  If a message is ready for
-     *  reading then the function will return true.  At this point the user may choose to decode the message using
-     *  the decode() function of the appropriate concrete messag type.  The user must call read_advance() on the
-     *  buffer passing in the length which is output from this function to advance past the current message to the
-     *  next message in the buffer.  If read_advance() is not called then detect() and decode() will repeatedly
-     *  detect and decode the same message. */
-    static auto detect(buffer const& in, message_type& type, size_t& len) -> bool;
-
   public:
     virtual ~message();
 
@@ -160,6 +160,32 @@ namespace rapic
     /** It is the user's responsibility to ensure that the concrete type of the message object matches the encoded
      *  message currently at the front of the buffer.  This can be ensured using the detect() function. */
     virtual auto decode(buffer const& in) -> void = 0;
+  };
+
+  /// Comment message
+  /** This message type is generally only found in rapic files where multiple rapic scans have been concatenated
+   *  into a single volume file.  Comments start with a forward slash '/' and are used to implement meta-headers
+   *  such as IMAGE, RXTIME, IMAGESCANS, IMAGESIZE, IMAGEHEADER etc.  These headers provide information to
+   *  3D-Rapic which allow it to index directly into the file without parsing every scan.  Messages of this type
+   *  are never sent by Bureau radar transmitters over the wire. */
+  class comment : public message
+  {
+  public:
+    /// Construct an empty comment message
+    comment();
+
+    auto type() const -> message_type override;
+    auto reset() -> void override;
+    auto encode(buffer& out) const -> void override;
+    auto decode(buffer const& in) -> void override;
+
+    /// Get the message string
+    auto text() const -> std::string const&                           { return text_; }
+    /// Set the message string
+    auto set_text(std::string const& val) -> void                     { text_ = val; }
+
+  private:
+    std::string text_;
   };
 
   /// MSSG status message
