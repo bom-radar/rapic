@@ -131,33 +131,48 @@ int main(int argc, char* argv[])
       throw std::system_error{errno, std::system_category(), "failed to read input file"};
     size_t len = l;
 
-    std::unique_ptr<uint8_t[]> buf{new uint8_t[len]};
-
     if (fseek(fin, 0, SEEK_SET) != 0)
       throw std::system_error{errno, std::system_category(), "failed to read input file"};
 
-    if (fread(buf.get(), 1, len, fin) != len)
+    rapic::buffer buf(len);
+    if (fread(buf.write_acquire(len).first, 1, len, fin) != len)
       throw std::system_error{errno, std::system_category(), "failed to read input file"};
+    buf.write_advance(len);
 
     // find scans and parse them into a list
+    rapic::message_type type;
+    size_t msglen;
     std::list<rapic::scan> scans;
-    for (size_t i = 0; i < len; ++i)
+    for (auto ra = buf.read_acquire(); ra.second != 0; ra = buf.read_acquire())
     {
       // whitespace - skip
-      if (buf[i] <= 20)
-        continue;
-
-      // image header - skip
-      if (buf[i] == '/')
+      if (*ra.first <= 0x20)
       {
-        while (i < len && buf[i] != '\n')
-          ++i;
-        continue;
+        buf.read_advance(1);
       }
-
+      // image header - skip
+      else if (*ra.first == '/')
+      {
+        auto i = 1;
+        while (i < ra.second && ra.first[i] != '\n')
+          ++i;
+        buf.read_advance(i);
+      }
       // scan - find end and decode
-      scans.emplace_back();
-      i += scans.back().decode(&buf[i], len - i);
+      else if (buf.read_detect(type, msglen))
+      {
+        if (type == rapic::message_type::scan)
+        {
+          scans.emplace_back();
+          scans.back().decode(buf);
+        }
+        else if (!quiet)
+          std::cout << "unexpected rapic message type encountered" << std::endl;
+
+        buf.read_advance(msglen);
+      }
+      else
+        throw std::runtime_error{"extra unknown data in file"};
     }
 
     // convert the list of scans into a volume

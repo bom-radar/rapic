@@ -140,9 +140,6 @@ namespace rapic
   class message
   {
   public:
-    static auto detect_type(buffer const& data, message_type& type, size_t& len) -> bool;
-
-  public:
     virtual ~message();
 
     /// Get the type of this message
@@ -155,7 +152,7 @@ namespace rapic
     virtual auto encode(buffer& out) const -> void = 0;
 
     /// Decode the message from the wire format
-    virtual auto decode(uint8_t const* in, size_t size) -> size_t = 0;
+    virtual auto decode(buffer const& in) -> void = 0;
   };
 
   /// MSSG status message
@@ -168,7 +165,7 @@ namespace rapic
     auto type() const -> message_type override;
     auto reset() -> void override;
     auto encode(buffer& out) const -> void override;
-    auto decode(uint8_t const* in, size_t size) -> size_t override;
+    auto decode(buffer const& in) -> void override;
 
     /// Get the message number
     auto number() const -> int                                        { return number_; }
@@ -196,7 +193,7 @@ namespace rapic
     auto type() const -> message_type override;
     auto reset() -> void override;
     auto encode(buffer& out) const -> void override;
-    auto decode(uint8_t const* in, size_t size) -> size_t override;
+    auto decode(buffer const& in) -> void override;
 
     /// Get the message string
     auto text() const -> std::string const&                           { return text_; }
@@ -217,7 +214,7 @@ namespace rapic
     auto type() const -> message_type override;
     auto reset() -> void override;
     auto encode(buffer& out) const -> void override;
-    auto decode(uint8_t const* in, size_t size) -> size_t override;
+    auto decode(buffer const& in) -> void override;
 
     /// Get whether txcompletescans is set
     auto tx_complete_scans() const -> bool                            { return tx_complete_scans_; }
@@ -236,7 +233,7 @@ namespace rapic
     auto type() const -> message_type override;
     auto reset() -> void override;
     auto encode(buffer& out) const -> void override;
-    auto decode(uint8_t const* in, size_t size) -> size_t override;
+    auto decode(buffer const& in) -> void override;
 
     /// Get the station identifier (0 = any)
     auto station_id() const -> int                                    { return station_id_; }
@@ -287,7 +284,7 @@ namespace rapic
     auto type() const -> message_type override;
     auto reset() -> void override;
     auto encode(buffer& out) const -> void override;
-    auto decode(uint8_t const* in, size_t size) -> size_t override;
+    auto decode(buffer const& in) -> void override;
 
     /// Get the station identifier
     auto station_id() const -> int                                    { return station_id_; }
@@ -394,7 +391,7 @@ namespace rapic
     auto type() const -> message_type override;
     auto reset() -> void override;
     auto encode(buffer& out) const -> void override;
-    auto decode(uint8_t const* in, size_t size) -> size_t override;
+    auto decode(buffer const& in) -> void override;
 
     /// Get the station identifier
     auto station_id() const -> int                                    { return station_id_; }

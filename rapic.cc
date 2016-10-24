@@ -45,7 +45,7 @@ static const std::string msg_keepalive{"RDRSTAT:\n"};
 
 static const std::string msg_mssg_head{"MSSG:"};
 static const std::string msg_mssg30_head{"MSSG: 30"};
-static const std::string msg_mssg30_term{"\nEND STATUS"};
+static const std::string msg_mssg30_term{"END STATUS"};
 static const std::string msg_status_head{"RDRSTAT:"};
 static const std::string msg_permcon_head{"RPQUERY: SEMIPERMANENT CONNECTION"};
 static const std::string msg_query_head{"RPQUERY:"};
@@ -75,7 +75,7 @@ constexpr lookup_value lnul() { return { enc_type::error, 0, 0 }; }
 constexpr lookup_value lval(int x) { return { enc_type::value, x, 0 }; }
 constexpr lookup_value lrel(int x) { return { enc_type::digit, x, 0 }; }
 constexpr lookup_value ldel(int x, int y) { return { enc_type::delta, x, y }; }
-constexpr lookup_value lookup[] = 
+constexpr lookup_value lookup[] =
 {
   lend(),     lnul(),      lnul(),      lnul(),      lnul(),      lnul(),      lnul(),      lnul(),      // 00-07
   lnul(),     lnul(),      lend(),      lnul(),      lnul(),      lend(),      lnul(),      lnul(),      // 08-0f
@@ -118,6 +118,13 @@ static auto find_non_whitespace(uint8_t const* begin, uint8_t const* end) -> uin
   return begin;
 }
 
+static auto find_non_whitespace_or_eol(uint8_t const* begin, uint8_t const* end) -> uint8_t const*
+{
+  while (begin != end && *begin <= 0x20 && *begin != '\n' && *begin != '\r' && *begin != '\0')
+    ++begin;
+  return begin;
+}
+
 static auto starts_with(uint8_t const* begin, uint8_t const* end, std::string const& str) -> bool
 {
   auto b2 = str.c_str(), e2 = str.c_str() + str.size();
@@ -129,42 +136,20 @@ static auto starts_with(uint8_t const* begin, uint8_t const* end, std::string co
   return b2 == e2;
 }
 
+#if 0
 static auto find_string(uint8_t const* begin, uint8_t const* end, std::string const& str) -> uint8_t const*
 {
   while (begin != end && !starts_with(begin, end, str))
     ++begin;
   return begin;
 }
+#endif
 
 static auto find_eol(uint8_t const* begin, uint8_t const* end) -> uint8_t const*
 {
   while (begin != end && *begin != '\n' && *begin != '\r' && *begin != '\0')
     ++begin;
   return begin;
-}
-
-// -------------------
-
-// find the next text within a line, or the end of line
-static auto find_text(uint8_t const* in, size_t size, size_t pos) -> size_t
-{
-  for (size_t i = pos; i < size; ++i)
-  {
-    if (in[i] == '\0' || in[i] == '\n')
-      return i;
-    if (!std::isspace(in[i]))
-      return i;
-  }
-  throw std::runtime_error{"unterminated message"};
-}
-
-// find the end of the line
-static auto find_eol(uint8_t const* in, size_t size, size_t pos) -> size_t
-{
-  for (size_t i = pos; i < size; ++i)
-    if (in[i] == '\0' || in[i] == '\n')
-      return i;
-  throw std::runtime_error{"unterminated message"};
 }
 
 static auto parse_station_id(char const* in) -> int
@@ -382,10 +367,16 @@ auto buffer::read_detect(message_type& type, size_t& len) const -> bool
   // note: must check mssg30 before mssg as mssg header is a subset of mssg30 header
   if (starts_with(pos, end, msg_mssg30_head))
   {
-    if ((nxt = find_string(pos, end, msg_mssg30_term)) != end)
+    pos += msg_mssg30_head.size();
+    while ((nxt = find_eol(pos, end)) != end)
     {
-      msg = message_type::mssg;
-      nxt += msg_mssg30_term.size();
+      if (   size_t(nxt - pos) == msg_mssg30_term.size()
+          && msg_mssg30_term.compare(0, msg_mssg30_term.size(), reinterpret_cast<char const*>(pos), nxt - pos) == 0)
+      {
+        msg = message_type::mssg;
+        break;
+      }
+      pos = nxt + 1;
     }
   }
   // is it an MSSG style message?
@@ -421,10 +412,19 @@ auto buffer::read_detect(message_type& type, size_t& len) const -> bool
   // otherwise assume it is a scan message and look for "END RADAR IMAGE"
   else
   {
-    if ((nxt = find_string(pos, end, msg_scan_term)) != end)
+    while ((nxt = find_eol(pos, end)) != end)
     {
-      msg = message_type::scan;
-      nxt += msg_scan_term.size();
+      // the "END RADAR IMAGE" token is _sometimes_ prefixed with a ^Z (0x28), just detect and skip whitespace
+      if ((pos = find_non_whitespace(pos, nxt)) == nxt)
+        continue;
+
+      if (   size_t(nxt - pos) == msg_scan_term.size()
+          && msg_scan_term.compare(0, msg_scan_term.size(), reinterpret_cast<char const*>(pos), nxt - pos) == 0)
+      {
+        msg = message_type::scan;
+        break;
+      }
+      pos = nxt + 1;
     }
   }
 
@@ -441,7 +441,7 @@ auto buffer::read_detect(message_type& type, size_t& len) const -> bool
 
 auto buffer::read_decode(message& msg) const -> void
 {
-  msg.decode(&data_[rpos_], wpos_ - rpos_);
+  msg.decode(*this);
 }
 
 message::~message()
@@ -472,46 +472,54 @@ auto mssg::encode(buffer& out) const -> void
       , number_ == 30 ? "MSSG: %d %s\nEND STATUS\n" : "MSSG: %d %s\n"
       , number_
       , text_.c_str());
-  if (ret < 0 || ret >= wa.second)
+  if (ret < 0 || size_t(ret) >= wa.second)
     throw std::runtime_error{"rapic: failed to encode message"};
   out.write_advance(ret);
 }
 
-auto mssg::decode(uint8_t const* in, size_t size) -> size_t
-try
+auto mssg::decode(buffer const& in) -> void
 {
-  size_t pos, end;
+  auto ra = in.read_acquire();
+  auto pos = ra.first, end = ra.first + ra.second;
+
+  // skip leading whitespace
+  if ((pos = find_non_whitespace(pos, end)) == end)
+    throw std::runtime_error{"failed to parse message header"};
 
   // read the message identifier and number
-  ssize_t spos = 0;
-  if (sscanf(reinterpret_cast<char const*>(in), "MSSG: %d%zn", &number_, &spos) != 1 || spos == 0)
+  ssize_t len = 0;
+  if (sscanf(reinterpret_cast<char const*>(pos), "MSSG: %d%zn", &number_, &len) != 1 || len == 0)
     throw std::runtime_error{"failed to parse message header"};
-  pos = spos;
+  pos += len;
+  if (pos >= end)
+    throw std::runtime_error{"read buffer overflow"};
+
+  // skip whitepsace between the number and text
+  if ((pos = find_non_whitespace_or_eol(pos, end)) == end)
+    throw std::runtime_error{"read buffer overflow"};
 
   // remainder of line is the message text
-  pos = find_text(in, size, pos);
-  end = find_eol(in, size, pos);
-  text_.assign(reinterpret_cast<char const*>(in + pos), end - pos);
+  decltype(pos) eol;
+  if ((eol = find_eol(pos, end)) == end)
+    throw std::runtime_error{"read buffer overflow"};
+  text_.assign(reinterpret_cast<char const*>(pos), eol - pos);
+  pos = eol + 1;
 
   // handle multi-line messages (only #30)
   if (number_ == 30)
   {
-    while (true)
+    while ((eol = find_eol(pos, end)) != end)
     {
-      pos = end + 1;
-      end = find_eol(in, size, pos);
-      if (strncmp("END STATUS", reinterpret_cast<char const*>(in + pos), end - pos) == 0)
+      if (   size_t(eol - pos) == msg_mssg30_term.size()
+          && msg_mssg30_term.compare(0, msg_mssg30_term.size(), reinterpret_cast<char const*>(pos), eol - pos) == 0)
         break;
       text_.push_back('\n');
-      text_.append(reinterpret_cast<char const*>(in + pos), end - pos);
+      text_.append(reinterpret_cast<char const*>(pos), eol - pos);
+      pos = eol + 1;
     }
+    if (eol == end)
+      throw std::runtime_error{"read buffer overflow"};
   }
-
-  return end + 1;
-}
-catch (...)
-{
-  std::throw_with_nested(decode_error{message_type::mssg, in, size});
 }
 
 status::status()
@@ -533,32 +541,38 @@ auto status::encode(buffer& out) const -> void
 {
   auto wa = out.write_acquire(text_.size() + 16);
   auto ret = snprintf(reinterpret_cast<char*>(wa.first), wa.second, "RDRSTAT: %s\n", text_.c_str());
-  if (ret < 0 || ret >= wa.second)
+  if (ret < 0 || size_t(ret) >= wa.second)
     throw std::runtime_error{"rapic: failed to encode message"};
   out.write_advance(ret);
 }
 
-auto status::decode(uint8_t const* in, size_t size) -> size_t
-try
+auto status::decode(buffer const& in) -> void
 {
-  size_t pos, end;
+  auto ra = in.read_acquire();
+  auto pos = ra.first, end = ra.first + ra.second;
 
-  // read the header
-  ssize_t spos = 0;
-  if (sscanf(reinterpret_cast<char const*>(in), "RDRSTAT:%zn", &spos) != 0 || spos == 0)
+  // skip leading whitespace
+  if ((pos = find_non_whitespace(pos, end)) == end)
     throw std::runtime_error{"failed to parse message header"};
-  pos = spos;
+
+  // read the message identifier and number
+  ssize_t len = 0;
+  if (sscanf(reinterpret_cast<char const*>(pos), "RDRSTAT:%zn", &len) != 0 || len == 0)
+    throw std::runtime_error{"failed to parse message header"};
+  pos += len;
+  if (pos >= end)
+    throw std::runtime_error{"read buffer overflow"};
+
+  // skip whitepsace between the number and text
+  if ((pos = find_non_whitespace_or_eol(pos, end)) == end)
+    throw std::runtime_error{"read buffer overflow"};
 
   // remainder of line is the message text
-  pos = find_text(in, size, pos);
-  end = find_eol(in, size, pos);
-  text_.assign(reinterpret_cast<char const*>(in + pos), end - pos);
-
-  return end + 1;
-}
-catch (...)
-{
-  std::throw_with_nested(decode_error{message_type::status, in, size});
+  decltype(pos) eol;
+  if ((eol = find_eol(pos, end)) == end)
+    throw std::runtime_error{"read buffer overflow"};
+  text_.assign(reinterpret_cast<char const*>(pos), eol - pos);
+  pos = eol + 1;
 }
 
 permcon::permcon()
@@ -584,36 +598,39 @@ auto permcon::encode(buffer& out) const -> void
       , wa.second
       , "RPQUERY: SEMIPERMANENT CONNECTION - SEND ALL DATA TXCOMPLETESCANS=%d\n"
       , tx_complete_scans_);
-  if (ret < 0 || ret >= wa.second)
+  if (ret < 0 || size_t(ret) >= wa.second)
     throw std::runtime_error{"rapic: failed to encode message"};
   out.write_advance(ret);
 }
 
-auto permcon::decode(uint8_t const* in, size_t size) -> size_t
-try
+auto permcon::decode(buffer const& in) -> void
 {
-  int ival;
-  size_t pos, end;
+  auto ra = in.read_acquire();
+  auto pos = ra.first, end = ra.first + ra.second;
 
-  // read the header
-  ssize_t spos = 0;
+  // skip leading whitespace
+  if ((pos = find_non_whitespace(pos, end)) == end)
+    throw std::runtime_error{"failed to parse message header"};
+
+  // read the message identifier and number
+  int ival;
+  ssize_t len = 0;
   auto ret = sscanf(
-        reinterpret_cast<char const*>(in)
+        reinterpret_cast<char const*>(pos)
       , "RPQUERY: SEMIPERMANENT CONNECTION - SEND ALL DATA TXCOMPLETESCANS=%d%zn"
       , &ival
-      , &spos);
-  if (ret != 1 || spos == 0)
+      , &len);
+  if (ret != 1 || len == 0)
     throw std::runtime_error{"failed to parse message header"};
-  pos = spos;
+  tx_complete_scans_ = ival != 0;
+  pos += len;
+  if (pos >= end)
+    throw std::runtime_error{"read buffer overflow"};
 
-  // find the end of the line
-  end = find_eol(in, size, pos);
-
-  return end + 1;
-}
-catch (...)
-{
-  std::throw_with_nested(decode_error{message_type::status, in, size});
+  // find the end of the line (discard any extra text)
+  if ((pos = find_eol(pos, end)) == end)
+    throw std::runtime_error{"read buffer overflow"};
+  ++pos;
 }
 
 query::query()
@@ -644,17 +661,21 @@ auto query::encode(buffer& out) const -> void
   // TODO
 }
 
-auto query::decode(uint8_t const* in, size_t size) -> size_t
-try
+auto query::decode(buffer const& in) -> void
 {
-  long time;
-  char str_stn[21], str_stype[21], str_qtype[21], str_dtype[128];
-  size_t pos, end;
+  auto ra = in.read_acquire();
+  auto pos = ra.first, end = ra.first + ra.second;
+
+  // skip leading whitespace
+  if ((pos = find_non_whitespace(pos, end)) == end)
+    throw std::runtime_error{"failed to parse message header"};
 
   // read the header
-  ssize_t spos = 0;
+  long time;
+  char str_stn[21], str_stype[21], str_qtype[21], str_dtype[128];
+  ssize_t len = 0;
   auto ret = sscanf(
-        reinterpret_cast<char const*>(in)
+        reinterpret_cast<char const*>(pos)
       , "RPQUERY: %20s %20s %f %d %20s %ld %127s %d%zn"
       , str_stn
       , str_stype
@@ -664,10 +685,12 @@ try
       , &time
       , str_dtype
       , &video_res_
-      , &spos);
-  if (ret != 7 || spos == 0)
-    throw std::runtime_error{"corrupt message detected"};
-  pos = spos;
+      , &len);
+  if (ret != 7 || len == 0)
+    throw std::runtime_error{"failed to parse message header"};
+  pos += len;
+  if (pos >= end)
+    throw std::runtime_error{"read buffer overflow"};
 
   // check/parse the individual tokens
   station_id_ = parse_station_id(str_stn);
@@ -676,14 +699,10 @@ try
   time_ = time;
   data_types_ = parse_data_types(str_dtype);
 
-  // find the end of the line
-  end = find_eol(in, size, pos);
-
-  return end + 1;
-}
-catch (...)
-{
-  std::throw_with_nested(decode_error{message_type::status, in, size});
+  // find the end of the line (discard any extra text)
+  if ((pos = find_eol(pos, end)) == end)
+    throw std::runtime_error{"read buffer overflow"};
+  ++pos;
 }
 
 filter::filter()
@@ -711,28 +730,33 @@ auto filter::encode(buffer& out) const -> void
   // TODO
 }
 
-auto filter::decode(uint8_t const* in, size_t size) -> size_t
-try
+auto filter::decode(buffer const& in) -> void
 {
-  char str_stn[21], str_stype[21], str_src[21], str_dtype[256];
-  size_t pos, end;
+  auto ra = in.read_acquire();
+  auto pos = ra.first, end = ra.first + ra.second;
 
-  str_src[0] = '\0';
+  // skip leading whitespace
+  if ((pos = find_non_whitespace(pos, end)) == end)
+    throw std::runtime_error{"failed to parse message header"};
 
   // read the header
-  ssize_t spos = 0;
+  char str_stn[21], str_stype[21], str_src[21], str_dtype[256];
+  str_src[0] = '\0';
+  ssize_t len = 0;
   auto ret = sscanf(
-        reinterpret_cast<char const*>(in)
+        reinterpret_cast<char const*>(pos)
       , "RPFILTER:%20[^:]:%20[^:]:%d:%20[^:]:%255s%zn"
       , str_stn
       , str_stype
       , &video_res_
       , str_src
       , str_dtype
-      , &spos);
-  if (ret != 5 || spos == 0)
-    throw std::runtime_error{"corrupt message detected"};
-  pos = spos;
+      , &len);
+  if (ret != 5 || len == 0)
+    throw std::runtime_error{"failed to parse message header"};
+  pos += len;
+  if (pos >= end)
+    throw std::runtime_error{"read buffer overflow"};
 
   // check/parse the individual tokens
   station_id_ = parse_station_id(str_stn);
@@ -740,14 +764,10 @@ try
   source_.assign(str_src);
   data_types_ = parse_data_types(str_dtype);
 
-  // find the end of the line
-  end = find_eol(in, size, pos);
-
-  return end + 1;
-}
-catch (...)
-{
-  std::throw_with_nested(decode_error{message_type::status, in, size});
+  // find the end of the line (discard any extra text)
+  if ((pos = find_eol(pos, end)) == end)
+    throw std::runtime_error{"read buffer overflow"};
+  ++pos;
 }
 
 auto scan::header::get_boolean() const -> bool
@@ -865,14 +885,18 @@ auto scan::encode(buffer& out) const -> void
   // TODO
 }
 
-auto scan::decode(uint8_t const* in, size_t size) -> size_t
+auto scan::decode(buffer const& in) -> void
 try
 {
+  auto ra = in.read_acquire();
+  auto dat = ra.first;
+  auto size = ra.second;
+
   reset();
 
   for (size_t pos = 0; pos < size; ++pos)
   {
-    auto next = in[pos];
+    auto next = dat[pos];
 
     // ascii encoded ray
     if (next == '%')
@@ -893,7 +917,7 @@ try
 
       // determine the ray angle
       float angle;
-      if (sscanf(reinterpret_cast<char const*>(&in[pos]), is_rhi_ ? "%4f" : "%3f", &angle) != 1)
+      if (sscanf(reinterpret_cast<char const*>(&dat[pos]), is_rhi_ ? "%4f" : "%3f", &angle) != 1)
         throw std::runtime_error{"invalid ascii ray header"};
       pos += is_rhi_ ? 4 : 3;
 
@@ -906,7 +930,7 @@ try
       int bin = 0;
       while (pos < size)
       {
-        auto& cur = lookup[in[pos++]];
+        auto& cur = lookup[dat[pos++]];
 
         //  absolute pixel value
         if (cur.type == enc_type::value)
@@ -920,10 +944,10 @@ try
         else if (cur.type == enc_type::digit)
         {
           auto count = cur.val;
-          while (pos < size && lookup[in[pos]].type == enc_type::digit)
+          while (pos < size && lookup[dat[pos]].type == enc_type::digit)
           {
             count *= 10;
-            count += lookup[in[pos++]].val;
+            count += lookup[dat[pos++]].val;
           }
           if (bin + count > bins_)
             throw std::runtime_error{"scan data overflow (ascii rle)"};
@@ -942,7 +966,7 @@ try
 
           if (bin < bins_)
             out[bin++] = prev += cur.val2;
-          else if (pos < size && lookup[in[pos]].type != enc_type::terminate)
+          else if (pos < size && lookup[dat[pos]].type != enc_type::terminate)
             throw std::runtime_error{"scan data overflow (ascii delta)"};
         }
         // null or end of line character - end of radial
@@ -953,12 +977,12 @@ try
            * will break. */
           {
             auto i = pos;
-            while (i < size && in[i] <= ' ')
+            while (i < size && dat[i] <= ' ')
               ++i;
             if (   i < size
-                && in[i] != '%'
+                && dat[i] != '%'
                 && size - i >= msg_scan_term.size()
-                && strncmp(reinterpret_cast<char const*>(&in[i]), msg_scan_term.c_str(), msg_scan_term.size()) != 0)
+                && strncmp(reinterpret_cast<char const*>(&dat[i]), msg_scan_term.c_str(), msg_scan_term.size()) != 0)
               continue;
           }
 
@@ -989,10 +1013,10 @@ try
       // read the ray header
       float azi, el;
       int sec;
-      if (sscanf(reinterpret_cast<char const*>(&in[pos]), "%f,%f,%d=", &azi, &el, &sec) != 3)
+      if (sscanf(reinterpret_cast<char const*>(&dat[pos]), "%f,%f,%d=", &azi, &el, &sec) != 3)
         throw std::runtime_error("invalid binary ray header");
       // note: we ignore the length for now
-      //auto len = (((unsigned int) in[16]) << 8) + ((unsigned int) in[17]);
+      //auto len = (((unsigned int) dat[16]) << 8) + ((unsigned int) dat[17]);
       pos += 18;
 
       // create the ray entry
@@ -1003,10 +1027,10 @@ try
       int bin = 0;
       while (true)
       {
-        int val = in[pos++];
+        int val = dat[pos++];
         if (val == 0 || val == 1)
         {
-          int count = in[pos++];
+          int count = dat[pos++];
           if (count == 0)
             break;
           if (bin + count > bins_)
@@ -1027,22 +1051,22 @@ try
 
       // find the end of the header name
       for (pos2 = pos + 1; pos2 < size; ++pos2)
-        if (in[pos2] < ' ' || in[pos2] == ':')
+        if (dat[pos2] < ' ' || dat[pos2] == ':')
           break;
 
       // check for end of scan or corruption
-      if (pos2 >= size || in[pos2] != ':')
+      if (pos2 >= size || dat[pos2] != ':')
       {
         // valid end of scan?
         if (   pos2 - pos == msg_scan_term.size()
-            && strncmp(reinterpret_cast<char const*>(&in[pos]), msg_scan_term.c_str(), msg_scan_term.size()) == 0)
-          return pos + msg_scan_term.size();
+            && strncmp(reinterpret_cast<char const*>(&dat[pos]), msg_scan_term.c_str(), msg_scan_term.size()) == 0)
+          return;
         throw std::runtime_error{"corrupt scan detected (3)"};
       }
 
       // find the start of the header value
       for (pos3 = pos2 + 1; pos3 < size; ++pos3)
-        if (in[pos3] > ' ')
+        if (dat[pos3] > ' ')
           break;
 
       // check for corruption
@@ -1051,17 +1075,18 @@ try
 
       // find the end of the header value
       for (pos4 = pos3 + 1; pos4 < size; ++pos4)
-        if (in[pos4] < ' ') // note: spaces are valid characters in the header value
+        if (dat[pos4] < ' ') // note: spaces are valid characters in the header value
           break;
 
       // store the header
       headers_.emplace_back(
-            std::string(reinterpret_cast<char const*>(&in[pos]), pos2 - pos)
-          , std::string(reinterpret_cast<char const*>(&in[pos3]), pos4 - pos3));
+            std::string(reinterpret_cast<char const*>(&dat[pos]), pos2 - pos)
+          , std::string(reinterpret_cast<char const*>(&dat[pos3]), pos4 - pos3));
 
       // advance past the header line
       pos = pos4;
     }
+    // else whitespace - skip
   }
 
   throw std::runtime_error{"corrupt scan detected (5)"};
