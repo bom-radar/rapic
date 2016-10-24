@@ -153,13 +153,13 @@ int main(int argc, char* argv[])
       // image header - skip
       else if (*ra.first == '/')
       {
-        auto i = 1;
+        size_t i = 1;
         while (i < ra.second && ra.first[i] != '\n')
           ++i;
         buf.read_advance(i);
       }
       // scan - find end and decode
-      else if (buf.read_detect(type, msglen))
+      else if (rapic::message::detect(buf, type, msglen))
       {
         if (type == rapic::message_type::scan)
         {

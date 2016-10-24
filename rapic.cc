@@ -276,6 +276,33 @@ buffer::buffer(size_t size, size_t max_size)
   , max_size_{max_size}
 { }
 
+buffer::buffer(buffer const& rhs)
+  : size_{rhs.size_}
+  , data_{new uint8_t[size_]}
+  , wpos_{rhs.wpos_ - rhs.rpos_}
+  , rpos_{0}
+  , max_size_{rhs.max_size_}
+{
+  for (size_t i = 0; i < wpos_; ++i)
+    data_[i] = rhs.data_[rhs.rpos_ + i];
+}
+
+auto buffer::operator=(buffer const& rhs) -> buffer&
+{
+  if (size_ != rhs.size_)
+    data_.reset(new uint8_t[rhs.size_]);
+
+  // no exceptions beyond here
+  size_ = rhs.size_;
+  wpos_ = rhs.wpos_ - rhs.rpos_;
+  rpos_ = 0;
+  max_size_ = rhs.max_size_;
+  for (size_t i = 0; i < wpos_; ++i)
+    data_[i] = rhs.data_[rhs.rpos_ + i];
+
+  return *this;
+}
+
 auto buffer::resize(size_t size) -> void
 {
   if (size < wpos_ - rpos_)
@@ -352,12 +379,12 @@ auto buffer::read_advance(size_t len) -> void
     rpos_ = wpos_ = 0;
 }
 
-auto buffer::read_detect(message_type& type, size_t& len) const -> bool
+auto message::detect(buffer const& in, message_type& type, size_t& len) -> bool
 {
+  auto ra = in.read_acquire();
+  auto pos = ra.first, end = ra.first + ra.second;
+  decltype(pos) nxt;
   message_type msg = no_message;
-  uint8_t const* pos = &data_[rpos_];
-  uint8_t const* end = &data_[wpos_];
-  uint8_t const* nxt;
 
   // ignore leading whitespace (and return if no data at all)
   if ((pos = find_non_whitespace(pos, end)) == end)
@@ -432,16 +459,11 @@ auto buffer::read_detect(message_type& type, size_t& len) const -> bool
   if (msg != no_message)
   {
     type = msg;
-    len = nxt + 1 - &data_[rpos_];
+    len = nxt + 1 - ra.first;
     return true;
   }
 
   return false;
-}
-
-auto buffer::read_decode(message& msg) const -> void
-{
-  msg.decode(*this);
 }
 
 message::~message()
@@ -1466,7 +1488,7 @@ auto client::dequeue(message_type& type) -> bool
   }
 
   // detect the next message in the stream
-  if (rbuf_.read_detect(cur_type_, cur_size_))
+  if (message::detect(rbuf_, cur_type_, cur_size_))
   {
     type = cur_type_;
     return true;
@@ -1490,7 +1512,7 @@ auto client::decode(message& msg) -> void
   // this ensures that corrupt messages do not stall the stream
   try
   {
-    rbuf_.read_decode(msg);
+    msg.decode(rbuf_);
   }
   catch (...)
   {

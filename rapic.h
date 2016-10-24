@@ -76,14 +76,24 @@ namespace rapic
     decode_error(message_type type, uint8_t const* in, size_t size);
   };
 
-  class message;
-
   /// Buffer for raw message data
   class buffer
   {
   public:
     /// Construct a buffer of the given size
     buffer(size_t size, size_t max_size = std::numeric_limits<size_t>::max());
+
+    /// Copy constructor
+    buffer(buffer const& rhs);
+
+    /// Move constructor
+    buffer(buffer&& rhs) noexcept = default;
+
+    /// Copy assignment operator
+    auto operator=(buffer const& rhs) -> buffer&;
+
+    /// Move assignment operator
+    auto operator=(buffer&& rhs) noexcept -> buffer& = default;
 
     /// Get the total size of the buffer
     auto size() const -> size_t;
@@ -110,21 +120,6 @@ namespace rapic
      *  there is no requirement to actually decode the rapic data (such as data logging). */
     auto read_acquire() const -> std::pair<uint8_t const*, size_t>;
 
-    /// Determine whether there is a complete message that can be read from the buffer, its type and length
-    /** This function should be used to detect a message ready for decoding in a buffer.  If a message is ready for
-     *  reading then the function will return true.  At this point the user may choose to decode the message using
-     *  the read_decode() function.  The user must call read_advance() passing in the length which is output from
-     *  this function to advance past the current message to the next message in the buffer.  If read_advance() is
-     *  not called then read_detect() and read_decode() will repeatedly detect and decode the same message. */
-    auto read_detect(message_type& type, size_t& len) const -> bool;
-
-    /// Decode the message at the front of the buffer
-    /** The user must know for certain that the buffer contains at least one complete rapic protocol message at the
-     *  current read location (leading whitespace will be ignored), and that the type of the message matches the
-     *  concrete type of the message object passed to the function.  The standard method of ensuring these
-     *  preconditions is via the read_detect() function. */
-    auto read_decode(message& msg) const -> void;
-
     /// Advance the read position by len bytes
     auto read_advance(size_t len) -> void;
 
@@ -140,6 +135,16 @@ namespace rapic
   class message
   {
   public:
+    /// Determine whether there is a complete message that can be read from the buffer, its type and length
+    /** This function should be used to detect a message ready for decoding in a buffer.  If a message is ready for
+     *  reading then the function will return true.  At this point the user may choose to decode the message using
+     *  the decode() function of the appropriate concrete messag type.  The user must call read_advance() on the
+     *  buffer passing in the length which is output from this function to advance past the current message to the
+     *  next message in the buffer.  If read_advance() is not called then detect() and decode() will repeatedly
+     *  detect and decode the same message. */
+    static auto detect(buffer const& in, message_type& type, size_t& len) -> bool;
+
+  public:
     virtual ~message();
 
     /// Get the type of this message
@@ -152,6 +157,8 @@ namespace rapic
     virtual auto encode(buffer& out) const -> void = 0;
 
     /// Decode the message from the wire format
+    /** It is the user's responsibility to ensure that the concrete type of the message object matches the encoded
+     *  message currently at the front of the buffer.  This can be ensured using the detect() function. */
     virtual auto decode(buffer const& in) -> void = 0;
   };
 
