@@ -69,6 +69,15 @@ namespace rapic
     , center_time
   };
 
+  /// Parse a station id string ('ANY' will output 0)
+  auto parse_station_id(char const* in) -> int;
+  /// Parse a scan type including product number (e.g. VOLUME1)
+  auto parse_scan_type(char const* in) -> std::pair<scan_type, int>;
+  /// Parse a query type string
+  auto parse_query_type(char const* in) -> query_type;
+  /// Parse a list of moments string
+  auto parse_data_types(char const* in) -> std::vector<std::string>;
+
   /// Error thrown upon failure to decode the rapic message stream
   class decode_error : public std::runtime_error
   {
@@ -174,6 +183,8 @@ namespace rapic
   public:
     /// Construct an empty comment message
     comment();
+    /// Construct a comment message by decoding it from a buffer
+    comment(buffer const& in);
 
     auto type() const -> message_type override;
     auto reset() -> void override;
@@ -195,6 +206,8 @@ namespace rapic
   public:
     /// Construct an empty status message
     mssg();
+    /// Construct a status message by decoding it from a buffer
+    mssg(buffer const& in);
 
     auto type() const -> message_type override;
     auto reset() -> void override;
@@ -223,6 +236,8 @@ namespace rapic
   public:
     /// Construct an empty status message
     status();
+    /// Construct a status message by decoding it from a buffer
+    status(buffer const& in);
 
     auto type() const -> message_type override;
     auto reset() -> void override;
@@ -244,6 +259,8 @@ namespace rapic
   public:
     /// Construct an empty permanent connection message
     permcon();
+    /// Construct a permanent connection message by decoding it from a buffer
+    permcon(buffer const& in);
 
     auto type() const -> message_type override;
     auto reset() -> void override;
@@ -263,6 +280,8 @@ namespace rapic
   public:
     /// Construct an empty query
     query();
+    /// Construct a query by decoding it from a buffer
+    query(buffer const& in);
 
     auto type() const -> message_type override;
     auto reset() -> void override;
@@ -312,15 +331,17 @@ namespace rapic
   class filter : public message
   {
   public:
-    /// Construct an empty query
+    /// Construct an empty filter
     filter();
+    /// Construct a filter by decoding it from a buffer
+    filter(buffer const& in);
 
     auto type() const -> message_type override;
     auto reset() -> void override;
     auto encode(buffer& out) const -> void override;
     auto decode(buffer const& in) -> void override;
 
-    /// Get the station identifier
+    /// Get the station identifier (0 = any)
     auto station_id() const -> int                                    { return station_id_; }
 
     /// Get the scan type
@@ -332,7 +353,7 @@ namespace rapic
     /// Get the video resolution
     auto video_resolution() const -> int                              { return video_res_; }
 
-    /// Get the source identifier (-1 = default)
+    /// Get the source identifier ("-1" = default)
     auto source() const -> std::string const&                         { return source_; }
 
     /// Get the data types
@@ -421,6 +442,8 @@ namespace rapic
   public:
     /// Construct an empty scan
     scan();
+    /// Construct a scan by decoding it from a buffer
+    scan(buffer const& in);
 
     auto type() const -> message_type override;
     auto reset() -> void override;

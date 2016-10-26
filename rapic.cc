@@ -153,7 +153,12 @@ static auto find_eol(uint8_t const* begin, uint8_t const* end) -> uint8_t const*
   return begin;
 }
 
-static auto parse_station_id(char const* in) -> int
+auto rapic::release_tag() -> char const*
+{
+  return RAPIC_RELEASE_TAG;
+}
+
+auto rapic::parse_station_id(char const* in) -> int
 {
   int ret = strcasecmp(in, "ANY") == 0 ? 0 : atoi(in);
   if (ret == 0 && in[0] != '0')
@@ -161,7 +166,7 @@ static auto parse_station_id(char const* in) -> int
   return ret;
 }
 
-static auto parse_scan_type(char const* in) -> std::pair<scan_type, int>
+auto rapic::parse_scan_type(char const* in) -> std::pair<scan_type, int>
 {
   // is it a numeric equivalent (must match ROWLF definitions - see scantype.cc)
   if (std::isdigit(in[0]))
@@ -204,7 +209,7 @@ static auto parse_scan_type(char const* in) -> std::pair<scan_type, int>
   throw std::runtime_error{"invalid scan type id"};
 }
 
-static auto parse_query_type(char const* in) -> query_type
+auto rapic::parse_query_type(char const* in) -> query_type
 {
   if (strcasecmp(in, "LATEST") == 0)
     return query_type::latest;
@@ -218,7 +223,7 @@ static auto parse_query_type(char const* in) -> query_type
   throw std::runtime_error{"invalid query type"};
 }
 
-static auto parse_data_types(char const* in) -> std::vector<std::string>
+auto rapic::parse_data_types(char const* in) -> std::vector<std::string>
 {
   std::vector<std::string> ret;
   size_t pos = 0, end = 0;
@@ -238,11 +243,6 @@ static auto parse_data_types(char const* in) -> std::vector<std::string>
   }
 
   return ret;
-}
-
-auto rapic::release_tag() -> char const*
-{
-  return RAPIC_RELEASE_TAG;
 }
 
 socket_handle::~socket_handle()
@@ -324,10 +324,13 @@ auto buffer::resize(size_t size) -> void
 
 auto buffer::optimize() -> void
 {
-  for (size_t i = 0; i < wpos_ - rpos_; ++i)
-    data_[i] = data_[rpos_ + i];
-  wpos_ -= rpos_;
-  rpos_ = 0;
+  if (rpos_ != 0)
+  {
+    for (size_t i = 0; i < wpos_ - rpos_; ++i)
+      data_[i] = data_[rpos_ + i];
+    wpos_ -= rpos_;
+    rpos_ = 0;
+  }
 }
 
 auto buffer::clear() -> void
@@ -481,6 +484,12 @@ comment::comment()
   reset();
 }
 
+comment::comment(buffer const& in)
+{
+  reset();
+  decode(in);
+}
+
 auto comment::type() const -> message_type
 {
   return message_type::comment;
@@ -528,6 +537,12 @@ auto comment::decode(buffer const& in) -> void
 mssg::mssg()
 {
   reset();
+}
+
+mssg::mssg(buffer const& in)
+{
+  reset();
+  decode(in);
 }
 
 auto mssg::type() const -> message_type
@@ -605,6 +620,12 @@ status::status()
   reset();
 }
 
+status::status(buffer const& in)
+{
+  reset();
+  decode(in);
+}
+
 auto status::type() const -> message_type
 {
   return message_type::status;
@@ -656,6 +677,12 @@ auto status::decode(buffer const& in) -> void
 permcon::permcon()
 {
   reset();
+}
+
+permcon::permcon(buffer const& in)
+{
+  reset();
+  decode(in);
 }
 
 auto permcon::type() const -> message_type
@@ -714,6 +741,12 @@ auto permcon::decode(buffer const& in) -> void
 query::query()
 {
   reset();
+}
+
+query::query(buffer const& in)
+{
+  reset();
+  decode(in);
 }
 
 auto query::type() const -> message_type
@@ -788,6 +821,12 @@ filter::filter()
   reset();
 }
 
+filter::filter(buffer const& in)
+{
+  reset();
+  decode(in);
+}
+
 auto filter::type() const -> message_type
 {
   return message_type::filter;
@@ -795,7 +834,7 @@ auto filter::type() const -> message_type
 
 auto filter::reset() -> void
 {
-  station_id_ = -1;
+  station_id_ = 0;
   scan_type_ = rapic::scan_type::any;
   volume_id_ = -1;
   video_res_ = -1;
@@ -932,6 +971,12 @@ auto scan::header::get_real_array() const -> std::vector<double>
 scan::scan()
 {
   reset();
+}
+
+scan::scan(buffer const& in)
+{
+  reset();
+  decode(in);
 }
 
 auto scan::type() const -> message_type
