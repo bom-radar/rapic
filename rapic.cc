@@ -844,7 +844,84 @@ auto filter::reset() -> void
 
 auto filter::encode(buffer& out) const -> void
 {
-  // TODO
+  // determine maximum needed buffer space
+  size_t limit = 13 + 3 + 8 + 3 + 8;
+  for (auto& type : data_types_)
+    limit += type.size() + 1;
+
+  // build the scan type string
+  char const* str_stype = nullptr;
+  char stypebuf[32];
+  switch (scan_type_)
+  {
+  case rapic::scan_type::any:
+    str_stype = "ANY";
+    break;
+  case rapic::scan_type::ppi:
+    str_stype = "PPI";
+    break;
+  case rapic::scan_type::rhi:
+    str_stype = "RHI";
+    break;
+  case rapic::scan_type::comp_ppi:
+    if (volume_id_ != -1)
+    {
+      sprintf(stypebuf, "COMPPPI%d", volume_id_);
+      str_stype = stypebuf;
+    }
+    else
+      str_stype = "CompPPI";
+    break;
+  case rapic::scan_type::image:
+    str_stype = "IMAGE";
+    break;
+  case rapic::scan_type::volume:
+    if (volume_id_ != -1)
+    {
+      sprintf(stypebuf, "VOLUME%d", volume_id_);
+      str_stype = stypebuf;
+    }
+    else
+      str_stype = "VOLUME";
+    break;
+  case rapic::scan_type::rhi_set:
+    str_stype = "RHI_SET";
+    break;
+  case rapic::scan_type::merge:
+    str_stype = "MERGE";
+    break;
+  case rapic::scan_type::scan_error:
+    str_stype = "SCAN_ERROR";
+    break;
+  }
+
+  // build the datatypes string list
+  char str_dtype[256];
+  {
+    auto ptr = &str_dtype[0];
+    for (auto& type : data_types_)
+    {
+      strcpy(ptr, type.c_str());
+      ptr += type.size();
+      *ptr++ = ',';
+    }
+    *(ptr - 1) = '\0';
+  }
+
+  // 
+  auto wa = out.write_acquire(limit);
+  auto ret = snprintf(
+        reinterpret_cast<char*>(wa.first)
+      , wa.second
+      , "RPFILTER:%d:%s:%d:%s:%s\n"
+      , station_id_
+      , str_stype
+      , video_res_
+      , source_.c_str()
+      , str_dtype);
+  if (ret < 0 || size_t(ret) >= wa.second)
+    throw std::runtime_error{"rapic: failed to encode message"};
+  out.write_advance(ret);
 }
 
 auto filter::decode(buffer const& in) -> void
@@ -1015,15 +1092,15 @@ auto scan::encode(buffer& out) const -> void
 
   // acquire the worst case memory block from our buffer so we don't have to check buffer capacity after every write
   auto wa = out.write_acquire(limit);
-  auto pos = wa.first, auto end = wa.first + wa.second;
+  auto pos = wa.first, end = wa.first + wa.second;
 
   // write the headers
   for (auto& header : headers_)
   {
-    strcpy(pos, header.name().c_str());
+    strcpy(reinterpret_cast<char*>(pos), header.name().c_str());
     pos += header.name().size();
     *pos++ = ':';
-    strcpy(pos, header.value().c_str());
+    strcpy(reinterpret_cast<char*>(pos), header.value().c_str());
     pos += header.value().size();
     *pos++ = '\n';
   }
@@ -1031,13 +1108,13 @@ auto scan::encode(buffer& out) const -> void
   // write the rays
   if (true/* ascii mode */)
   {
-    for (size_t ray = 0; ray < rays_; ++ray)
+    for (int ray = 0; ray < rays_; ++ray)
     {
       // ascii ray header
-      pos += sprintf(pos, is_rhi_ ? "%4f" : "%3f", ray_headers_[ray].azimuth());
+      pos += sprintf(reinterpret_cast<char*>(pos), is_rhi_ ? "%4f" : "%3f", ray_headers_[ray].azimuth());
 
       // encode the bins
-      size_t bin = 0;
+      int bin = 0;
       while (bin < bins_)
       {
       }
@@ -1048,19 +1125,19 @@ auto scan::encode(buffer& out) const -> void
   }
   else
   {
-    for (size_t ray = 0; ray < rays_; ++ray)
+    for (int ray = 0; ray < rays_; ++ray)
     {
     }
   }
   // TODO
 
   // write the terminator
-  strcpy(pos, msg_scan_term.c_str());
+  strcpy(reinterpret_cast<char*>(pos), msg_scan_term.c_str());
   pos += msg_scan_term.size();
   *pos++ = '\n';
 
   // commit the encoded message to the buffer (will also sanity check for overflow)
-  wa.write_advance(pos - wa.first);
+  out.write_advance(pos - wa.first);
 }
 
 auto scan::decode(buffer const& in) -> void
