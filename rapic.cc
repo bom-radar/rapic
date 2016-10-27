@@ -1029,6 +1029,29 @@ auto scan::encode(buffer& out) const -> void
   }
 
   // write the rays
+  if (true/* ascii mode */)
+  {
+    for (size_t ray = 0; ray < rays_; ++ray)
+    {
+      // ascii ray header
+      pos += sprintf(pos, is_rhi_ ? "%4f" : "%3f", ray_headers_[ray].azimuth());
+
+      // encode the bins
+      size_t bin = 0;
+      while (bin < bins_)
+      {
+      }
+
+      // terminating new line
+      *pos++ = '\n';
+    }
+  }
+  else
+  {
+    for (size_t ray = 0; ray < rays_; ++ray)
+    {
+    }
+  }
   // TODO
 
   // write the terminator
