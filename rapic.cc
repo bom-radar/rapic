@@ -1005,7 +1005,39 @@ auto scan::reset() -> void
 
 auto scan::encode(buffer& out) const -> void
 {
+  // determine the maximum amount of memory that could be required to encode the scan
+  // assumes rays are encoded as 256 level alternating level 0 and 1 which is worst case
+  size_t limit = 0;
+  for (auto& header : headers_)
+    limit += header.name().size() + header.value().size() + 2;  // 2 for ':' + '\n'
+  limit += rays_ * (bins_ * 2 + 18);                            // 2 for worst case rle, 18 for ray header
+  limit += msg_scan_term.size() + 3;                            // 3 for '\n', '^Z', '\n'
+
+  // acquire the worst case memory block from our buffer so we don't have to check buffer capacity after every write
+  auto wa = out.write_acquire(limit);
+  auto pos = wa.first, auto end = wa.first + wa.second;
+
+  // write the headers
+  for (auto& header : headers_)
+  {
+    strcpy(pos, header.name().c_str());
+    pos += header.name().size();
+    *pos++ = ':';
+    strcpy(pos, header.value().c_str());
+    pos += header.value().size();
+    *pos++ = '\n';
+  }
+
+  // write the rays
   // TODO
+
+  // write the terminator
+  strcpy(pos, msg_scan_term.c_str());
+  pos += msg_scan_term.size();
+  *pos++ = '\n';
+
+  // commit the encoded message to the buffer (will also sanity check for overflow)
+  wa.write_advance(pos - wa.first);
 }
 
 auto scan::decode(buffer const& in) -> void
