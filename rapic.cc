@@ -908,7 +908,7 @@ auto filter::encode(buffer& out) const -> void
     *(ptr - 1) = '\0';
   }
 
-  // 
+  // write the message
   auto wa = out.write_acquire(limit);
   auto ret = snprintf(
         reinterpret_cast<char*>(wa.first)
@@ -1105,31 +1105,79 @@ auto scan::encode(buffer& out) const -> void
     *pos++ = '\n';
   }
 
+  // determine the video resolution
+  auto vidres = 160;
+  for (auto& header : headers_)
+    if (header.name() == "VIDRES")
+      vidres = header.get_integer();
+
   // write the rays
-  if (true/* ascii mode */)
+  if (vidres == 16 || vidres == 32 || vidres == 64 || vidres == 160)
   {
     for (int ray = 0; ray < rays_; ++ray)
     {
       // ascii ray header
-      pos += sprintf(reinterpret_cast<char*>(pos), is_rhi_ ? "%4f" : "%3f", ray_headers_[ray].azimuth());
+      pos += sprintf(reinterpret_cast<char*>(pos), is_rhi_ ? "%%%4f" : "%%%3f", ray_headers_[ray].azimuth());
 
       // encode the bins
       int bin = 0;
       while (bin < bins_)
       {
+        // TODO
       }
 
       // terminating new line
       *pos++ = '\n';
     }
   }
-  else
+  else if (vidres == 256)
   {
     for (int ray = 0; ray < rays_; ++ray)
     {
+      // binary ray header
+      pos += sprintf(
+            reinterpret_cast<char*>(pos)
+          , "@%3.1f%3.1f,%03d="
+          , ray_headers_[ray].azimuth()
+          , ray_headers_[ray].elevation()
+          , ray_headers_[ray].time_offset());
+
+      // leave space for the count
+      auto len_pos = pos;
+      pos += 2;
+
+      // encode the bins
+      int bin = 0;
+      auto ray_data = &level_data_[bins_ * ray];
+      while (bin < bins_)
+      {
+        auto val = ray_data[bin];
+        if (val == 0 || val == 1)
+        {
+          *pos++ = val;
+          int count = 1;
+          while (count < 256 && ray_data[bin + count] == val)
+            ++count;
+          *pos++ = count;
+          bin += count;
+        }
+        else
+        {
+          *pos++ = val;
+          ++bin;
+        }
+      }
+      *pos++ = 0;
+      *pos++ = 0;
+
+      // fill the count now that we know what it is
+      auto ray_len = pos - len_pos - 2;
+      len_pos[0] = (ray_len >> 8) & 0x0f;
+      len_pos[1] = (ray_len >> 0) & 0x0f;
     }
   }
-  // TODO
+  else
+    throw std::runtime_error{"unsupported video resolution"};
 
   // write the terminator
   strcpy(reinterpret_cast<char*>(pos), msg_scan_term.c_str());
