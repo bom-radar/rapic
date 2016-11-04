@@ -167,6 +167,7 @@ int main(int argc, char* argv[])
           ++pos;
         if (pos != ra.first + ra.second)
           throw std::runtime_error{"extra unknown data in file"};
+        break;
       }
     }
 

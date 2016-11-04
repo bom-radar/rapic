@@ -116,12 +116,12 @@ constexpr char deltas[7][7] =
 {
   //  -3   -2   -1    0   +1   +2   +3
     { '!', '[', 'a', 'b', 'c', ']', '@' }   // -3
-  , { '/', 'd', 'e', 'f', 'g', 'h', '\\', } // -2
-  , { 'i', 'j', 'k', '<', 'l', 'm', 'n', }  // -1
-  , { 'o', 'p', '-', '.', '+', 'q', 'r', }  // 0
-  , { 's', 't', 'u', '>', 'v', 'w', 'x', }  // +1
-  , { '(', 'y', 'S', 'T', 'U', 'V', ')', }  // +2
-  , { '$', '{', 'W', 'X', 'Y', '}', '&', }  // +3
+  , { '/', 'd', 'e', 'f', 'g', 'h', '\\' } // -2
+  , { 'i', 'j', 'k', '<', 'l', 'm', 'n' }  // -1
+  , { 'o', 'p', '-', '.', '+', 'q', 'r' }  // 0
+  , { 's', 't', 'u', '>', 'v', 'w', 'x' }  // +1
+  , { '(', 'y', 'S', 'T', 'U', 'V', ')' }  // +2
+  , { '$', '{', 'W', 'X', 'Y', '}', '&' }  // +3
 };
 
 constexpr uint8_t absolutes[160] =
@@ -1118,7 +1118,7 @@ auto scan::encode(buffer& out) const -> void
 
   // acquire the worst case memory block from our buffer so we don't have to check buffer capacity after every write
   auto wa = out.write_acquire(limit);
-  auto pos = wa.first, end = wa.first + wa.second;
+  auto pos = wa.first;
 
   // write the headers
   for (auto& header : headers_)
@@ -1142,32 +1142,61 @@ auto scan::encode(buffer& out) const -> void
   {
     for (int ray = 0; ray < rays_; ++ray)
     {
+      auto ray_data = &level_data_[bins_ * ray];
+
       // ascii ray header
-      pos += sprintf(reinterpret_cast<char*>(pos), is_rhi_ ? "%%%4f" : "%%%3f", ray_headers_[ray].azimuth());
+      pos += sprintf(reinterpret_cast<char*>(pos), is_rhi_ ? "%%%02.1f" : "%%%03.0f", ray_headers_[ray].azimuth());
+
+      // always encode first bin as an absolute value
+      if (bins_ > 0)
+      {
+        if (ray_data[0] >= vidres)
+          throw std::runtime_error{"invalid level detected while encoding"};
+        *pos++ = absolutes[ray_data[0]];
+      }
 
       // encode the bins
-      int bin = 0;
-      auto ray_data = &level_data_[bins_ * ray];
-      uint8_t prev = 255;
-      size_t rle_count = 0;
-      while (bin < bins_)
+      int bin = 1;
+      while (bin < bins_ - 1)
       {
-        auto val = ray_data[bin];
+        auto count = 0;
+        while (bin + count < bins_ && ray_data[bin + count] == ray_data[bin - 1])
+          ++count;
+        if (count > 2)
+        {
+          pos += sprintf(reinterpret_cast<char*>(pos), "%d", count);
+          bin += count;
+          continue;
+        }
 
-        // sanity check
-        if (val >= vidres)
+        // try delta encoding (50% compression)
+        auto delta0 = int(ray_data[bin]) - int(ray_data[bin - 1]);
+        auto delta1 = int(ray_data[bin + 1]) - int(ray_data[bin]);
+        if (std::abs(delta0) <= 3 && std::abs(delta1) <= 3)
+        {
+          // '+3' to adjust deltas into row/col index
+          *pos++ = deltas[delta1 + 3][delta0 + 3];
+          bin += 2;
+          continue;
+        }
+
+        // sanity check the actual level values
+        if (ray_data[bin] >= vidres)
           throw std::runtime_error{"invalid level detected while encoding"};
 
-        // TODO - all this is WIP
-        // can we delta encode a pair?
-        if (std::abs(int(val) - int(prev)) > 3 && bin < bins_ - 1)
-        {
-          *pos++ = absolute[160];
-          prev = val;
-        }
-        else
-        {
-        }
+        // can't compress - use absolute encoding (no compression)
+        *pos++ = absolutes[ray_data[bin]];
+        ++bin;
+      }
+
+      // above loop may stop short by one bin this is to prevent delta encoding from overflowing the array due
+      // to the second half of a delta pair being past the end of the ray.  if we stopped short just encode
+      // the final bin using an absolute value
+      if (bin == bins_ - 1)
+      {
+        if (ray_data[bin] >= vidres)
+          throw std::runtime_error{"invalid level detected while encoding"};
+        *pos++ = absolutes[ray_data[bin]];
       }
 
       // terminating new line

@@ -107,6 +107,11 @@ if (odim_h5_FOUND)
   install(TARGETS rapic_to_odim DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime)
 endif()
 
+# build our test application (not in the 'all' target.  type 'make unit_tests' to build)
+add_executable(unit_tests unit_tests.cc)
+target_link_libraries(unit_tests rapic)
+set_target_properties(unit_tests PROPERTIES EXCLUDE_FROM_ALL 1)
+
 # build our demo application (not in the 'all' target.  type 'make demo' to build)
 add_executable(demo demo.cc)
 target_link_libraries(demo rapic)
