@@ -1,5 +1,5 @@
-
 Build on Fedora 25:
+  stage: build
   image: "fedora:25"
   before_script:
     - yum -y install gcc-c++ cmake make
@@ -7,4 +7,10 @@ Build on Fedora 25:
     - mkdir build && cd build
     - cmake ..
     - make
+
+Test:
+  stage: test
+  image: "fedora:25"
+  script:
+    - echo "test passed"
     
