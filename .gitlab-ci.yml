@@ -1,0 +1,10 @@
+
+Build on Fedora 25:
+  image: "fedora:25"
+  before_script:
+    - yum -y install gcc-c++ cmake make
+  script:
+    - mkdir build && cd build
+    - cmake ..
+    - make
+    
