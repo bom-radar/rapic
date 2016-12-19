@@ -269,6 +269,8 @@ namespace rapic
 
     /// Get whether txcompletescans is set
     auto tx_complete_scans() const -> bool                            { return tx_complete_scans_; }
+    /// Set whether txcompletescans is set
+    auto set_tx_complete_scans(bool val) -> void                      { tx_complete_scans_ = val; }
 
   private:
     bool tx_complete_scans_;
@@ -343,21 +345,35 @@ namespace rapic
 
     /// Get the station identifier (0 = any)
     auto station_id() const -> int                                    { return station_id_; }
+    /// Set the station identifier (0 = any)
+    auto set_station_id(int val) -> void                              { station_id_ = val; }
 
     /// Get the scan type
     auto scan_type() const -> rapic::scan_type                        { return scan_type_; }
+    /// Set the scan type
+    auto set_scan_type(rapic::scan_type val) -> void                  { scan_type_ = val; }
 
     /// Get the volume id (-1 = any or not volume)
     auto volume_id() const -> int                                     { return volume_id_; }
+    /// Set the volume id (-1 = any or not volume)
+    auto set_volume_id(int val) -> void                               { volume_id_ = val; }
 
     /// Get the video resolution
     auto video_resolution() const -> int                              { return video_res_; }
+    /// Set the video resolution
+    auto set_video_resolution(int val) -> void                        { video_res_ = val; }
 
     /// Get the source identifier ("-1" = default)
     auto source() const -> std::string const&                         { return source_; }
+    /// Set the source identifier ("-1" = default)
+    auto set_source(std::string const& val) -> void                   { source_ = val; }
 
     /// Get the data types
     auto data_types() const -> std::vector<std::string> const&        { return data_types_; }
+    /// Get the data types
+    auto data_types() -> std::vector<std::string>&                    { return data_types_; }
+    /// Set the data types
+    auto set_data_types(std::vector<std::string> val) -> void         { data_types_ = std::move(val); }
 
   private:
     int                       station_id_;
