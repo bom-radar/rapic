@@ -496,7 +496,7 @@ namespace rapic
      *  CW sector sweeps) or ANGLE1 from the product header (for descending RHIs or CCW sector sweeps). */
     auto angle_max() const -> float                                   { return angle_max_; }
 
-    /// Get the anglular resolution for the scan
+    /// Get the angular resolution for the scan
     /** This value represents the angular sweep width of a single ray. */
     auto angle_resolution() const -> float                            { return angle_resolution_; }
 
@@ -511,15 +511,22 @@ namespace rapic
     auto find_header(char const* name) const -> header const*;
 
     /// Access the information about each ray
+    /** The number of ray headers may be less than the number of rays in the level data array.  This simply means
+     *  that some rays for the scan were not sent and should be treated as missing data. */
     auto ray_headers() const -> std::vector<ray_header> const&        { return ray_headers_; }
 
     /// Get the number of rays (ie: rows) in the level data array
+    /** This is the number of rays that are conceptually in the scan.  The number of rays actually stored and
+     *  available may be smaller than this.  The number of rays available is indicated by the number of ray
+     *  headers. */
     auto rays() const -> int                                          { return rays_; }
 
     /// Get the number of bins (ie: columns) in the level data array
     auto bins() const -> int                                          { return bins_; }
 
     /// Access the scan data encoded as levels
+    /** The size of this array is rays() * bins(), however only ray_headers().size() * bins() of data is actually
+     *  valid. */
     auto level_data() const -> uint8_t const*                         { return level_data_.data(); }
 
   private:

@@ -1108,6 +1108,10 @@ auto scan::reset() -> void
 
 auto scan::encode(buffer& out) const -> void
 {
+  // sanity check
+  if (ray_headers_.size() > rays_)
+    throw std::runtime_error{"ray header count exceeds ray limit"};
+
   // determine the maximum amount of memory that could be required to encode the scan
   // assumes rays are encoded as 256 level alternating level 0 and 1 which is worst case
   size_t limit = 0;
@@ -1140,7 +1144,7 @@ auto scan::encode(buffer& out) const -> void
   // write the rays
   if (vidres == 16 || vidres == 32 || vidres == 64 || vidres == 160)
   {
-    for (int ray = 0; ray < rays_; ++ray)
+    for (int ray = 0; ray < ray_headers_.size(); ++ray)
     {
       auto ray_data = &level_data_[bins_ * ray];
 
@@ -1205,7 +1209,7 @@ auto scan::encode(buffer& out) const -> void
   }
   else if (vidres == 256)
   {
-    for (int ray = 0; ray < rays_; ++ray)
+    for (int ray = 0; ray < ray_headers_.size(); ++ray)
     {
       // binary ray header
       pos += sprintf(
