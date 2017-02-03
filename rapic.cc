@@ -515,11 +515,13 @@ auto scan::initialize_rays() -> void
   level_data_.resize(rays_ * bins_);
 }
 
-client::client(size_t buffer_size, time_t keepalive_period)
+client::client(size_t buffer_size, time_t keepalive_period, time_t inactivity_timeout)
   : keepalive_period_{keepalive_period}
+  , inactivity_timeout_{inactivity_timeout}
   , socket_{-1}
   , establish_wait_{false}
   , last_keepalive_{0}
+  , last_activity_{0}
   , buffer_{new uint8_t[buffer_size]}
   , capacity_{buffer_size}
   , wcount_{0}
@@ -532,10 +534,12 @@ client::client(client&& rhs) noexcept
   : address_(std::move(rhs.address_))
   , service_(std::move(rhs.service_))
   , keepalive_period_(std::move(keepalive_period_))
+  , inactivity_timeout_(std::move(inactivity_timeout_))
   , filters_(std::move(rhs.filters_))
   , socket_{rhs.socket_}
   , establish_wait_{rhs.establish_wait_}
   , last_keepalive_{rhs.last_keepalive_}
+  , last_activity_{rhs.last_activity_}
   , buffer_(std::move(rhs.buffer_))
   , capacity_{rhs.capacity_}
   , wcount_{rhs.wcount_.load()}
@@ -551,10 +555,12 @@ auto client::operator=(client&& rhs) noexcept -> client&
   address_ = std::move(rhs.address_);
   service_ = std::move(rhs.service_);
   keepalive_period_ = std::move(rhs.keepalive_period_);
+  inactivity_timeout_ = std::move(rhs.inactivity_timeout_);
   filters_ = std::move(rhs.filters_);
   socket_ = rhs.socket_;
   establish_wait_ = rhs.establish_wait_;
   last_keepalive_ = rhs.last_keepalive_;
+  last_activity_ = rhs.last_activity_;
   buffer_ = std::move(rhs.buffer_);
   capacity_ = rhs.capacity_;
   wcount_ = rhs.wcount_.load();
@@ -660,6 +666,9 @@ auto client::connect(std::string address, std::string service) -> void
 
   // clean up the address list allocated by getaddrinfo
   freeaddrinfo(addr);
+
+  // set the last activity to now so we don't immediately timeout
+  last_activity_ = time(NULL);
 }
 
 auto client::disconnect() -> void
@@ -778,6 +787,9 @@ auto client::process_traffic() -> bool
     auto bytes = recv(socket_, &buffer_[wpos], space, 0);
     if (bytes > 0)
     {
+      // reset our inactivity timeout
+      last_activity_ = now;
+
       // advance our write position
       wcount_ += bytes;
 
@@ -788,7 +800,16 @@ auto client::process_traffic() -> bool
     {
       // if we've run out of data to read stop trying
       if (errno == EAGAIN || errno == EWOULDBLOCK)
+      {
+        // check our inactivity timeout
+        if (now - last_activity_ > inactivity_timeout_)
+        {
+          disconnect();
+          throw std::runtime_error{"rapic: inactivity timeout"};
+        }
+
         return false;
+      }
 
       // if we were interrupted by a signal handler just try again
       if (errno == EINTR)

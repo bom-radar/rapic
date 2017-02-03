@@ -259,7 +259,7 @@ namespace rapic
   {
   public:
     /// Construct a new connection
-    client(size_t buffer_size = 10 * 1024 * 1024, time_t keepalive_period = 40);
+    client(size_t buffer_size = 10 * 1024 * 1024, time_t keepalive_period = 40, time_t inactivity_timeout = 120);
 
     client(client const&) = delete;
     auto operator=(client const&) -> client& = delete;
@@ -347,10 +347,12 @@ namespace rapic
     std::string         address_;           // remote hostname or address
     std::string         service_;           // remote service or port number
     time_t              keepalive_period_;  // time between sending keepalives
+    time_t              inactivity_timeout_;  // drop connection after this long without incoming data
     filter_store        filters_;           // filter strings
     int                 socket_;            // socket handle
     bool                establish_wait_;    // are we waiting for socket connection to be established?
     time_t              last_keepalive_;    // time of last keepalive send
+    time_t              last_activity_;     // time of last data received
 
     buffer              buffer_;            // ring buffer to store packets off the wire
     size_t              capacity_;          // total usable buffer capacity
