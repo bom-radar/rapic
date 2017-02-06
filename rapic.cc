@@ -519,7 +519,7 @@ client::client(size_t buffer_size, time_t keepalive_period, time_t inactivity_ti
   : keepalive_period_{keepalive_period}
   , inactivity_timeout_{inactivity_timeout}
   , socket_{-1}
-  , state_{connection_state::disconnected}
+  , state_{rapic::connection_state::disconnected}
   , last_keepalive_{0}
   , last_activity_{0}
   , buffer_{new uint8_t[buffer_size]}
@@ -580,7 +580,7 @@ client::~client()
 
 auto client::add_filter(int station, std::string const& product, std::vector<std::string> const& moments) -> void
 {
-  if (state_ != connection_state::disconnected)
+  if (state_ != rapic::connection_state::disconnected)
     throw std::runtime_error{"rapic: add_filter called while connected"};
 
   // RPFILTER
@@ -599,7 +599,7 @@ auto client::add_filter(int station, std::string const& product, std::vector<std
 
 auto client::connect(std::string address, std::string service) -> void
 {
-  if (state_ != connection_state::disconnected)
+  if (state_ != rapic::connection_state::disconnected)
     throw std::runtime_error{"rapic: connect called while already connected"};
 
   // store connection details
@@ -659,10 +659,10 @@ auto client::connect(std::string address, std::string service) -> void
       freeaddrinfo(addr);
       throw std::system_error{errno, std::system_category(), "rapic: failed to establish connection"};
     }
-    state_ = connection_state::in_progress;
+    state_ = rapic::connection_state::in_progress;
   }
   else
-    state_ = connection_state::established;
+    state_ = rapic::connection_state::established;
 
   // clean up the address list allocated by getaddrinfo
   freeaddrinfo(addr);
@@ -684,7 +684,7 @@ auto client::disconnect() -> void
   if (socket_ != -1)
     close(socket_);
   socket_ = -1;
-  state_ = connection_state::disconnected;
+  state_ = rapic::connection_state::disconnected;
   last_keepalive_ = 0;
   wbuffer_.clear();
 }
@@ -701,17 +701,17 @@ auto client::pollable_fd() const -> int
 
 auto client::poll_read() const -> bool
 {
-  return state_ == connection_state::established;
+  return state_ == rapic::connection_state::established;
 }
 
 auto client::poll_write() const -> bool
 {
-  return state_ == connection_state::in_progress || !wbuffer_.empty();
+  return state_ == rapic::connection_state::in_progress || !wbuffer_.empty();
 }
 
 auto client::poll(int timeout) const -> void
 {
-  if (state_ == connection_state::disconnected)
+  if (state_ == rapic::connection_state::disconnected)
     throw std::runtime_error{"rapic: attempt to poll while disconnected"};
 
   struct pollfd fds;
@@ -723,14 +723,14 @@ auto client::poll(int timeout) const -> void
 auto client::process_traffic() -> bool
 {
   // sanity check
-  if (state_ == connection_state::disconnected)
+  if (state_ == rapic::connection_state::disconnected)
     return false;
 
   // get current time
   auto now = time(NULL);
 
   // need to check our connection attempt progress
-  if (state_ == connection_state::in_progress)
+  if (state_ == rapic::connection_state::in_progress)
   {
     int res = 0; socklen_t len = sizeof(res);
     if (getsockopt(socket_, SOL_SOCKET, SO_ERROR, &res, &len) < 0)
@@ -750,7 +750,7 @@ auto client::process_traffic() -> bool
       throw std::system_error{res, std::system_category(), "rapic: failed to establish connection (async)"};
     }
 
-    state_ = connection_state::established;
+    state_ = rapic::connection_state::established;
   }
 
   // do we need to send a keepalive? (ie: RDRSTAT)
