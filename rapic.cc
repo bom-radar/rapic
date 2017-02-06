@@ -749,24 +749,38 @@ auto client::process_traffic() -> bool
      *       write buffer here (extremely unlikely) then we will need to buffer writes like we do reads */
 
     // activate the semi-permanent connection
-    while (write(socket_, msg_connect.c_str(), msg_connect.size()) == -1)
+    ssize_t ret;
+    while ((ret = write(socket_, msg_connect.c_str(), msg_connect.size())) == -1)
       if (errno != EINTR)
         throw std::system_error{errno, std::system_category(), "rapic: failed to write to socket"};
+    if (ret != (ssize_t) msg_connect.size())
+      throw std::runtime_error{"rapic: failed to write entire message"};
 
     // activate each of our filters
     for (auto& filter : filters_)
-      while (write(socket_, filter.c_str(), filter.size()) == -1)
+    {
+      while ((ret = write(socket_, filter.c_str(), filter.size())) == -1)
         if (errno != EINTR)
           throw std::system_error{errno, std::system_category(), "rapic: failed to write to socket"};
+      if (ret != (ssize_t) filter.size())
+        throw std::runtime_error{"rapic: failed to write entire message"};
+    }
   }
 
   // do we need to send a keepalive? (ie: RDRSTAT)
   if (now - last_keepalive_ > keepalive_period_)
   {
-    while (write(socket_, msg_keepalive.c_str(), msg_keepalive.size()) == -1)
-      if (errno != EINTR)
-        throw std::system_error{errno, std::system_category(), "rapic: failed to write to socket"};
-    last_keepalive_ = now;
+    // don't try to send a keepalive during establish_wait (that would obviously require blocking!)
+    if (!establish_wait_)
+    {
+      ssize_t ret;
+      while ((ret = write(socket_, msg_keepalive.c_str(), msg_keepalive.size())) == -1)
+        if (errno != EINTR)
+          throw std::system_error{errno, std::system_category(), "rapic: failed to write to socket"};
+      if (ret != (ssize_t) msg_keepalive.size())
+        throw std::runtime_error{"rapic: failed to write entire message"};
+      last_keepalive_ = now;
+    }
   }
 
   // read everything we can
