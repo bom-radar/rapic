@@ -94,7 +94,7 @@ int main(int argc, char const* argv[])
     con.connect("cmssdev.bom.gov.au", "15555");
 
     // loop forever as long as the connection stays open
-    while (con.connected())
+    while (con.connection_state() != rapic::connection_state::disconnected)
     {
       // wait for messages to arrive
       con.poll();

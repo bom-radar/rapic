@@ -519,7 +519,7 @@ client::client(size_t buffer_size, time_t keepalive_period, time_t inactivity_ti
   : keepalive_period_{keepalive_period}
   , inactivity_timeout_{inactivity_timeout}
   , socket_{-1}
-  , establish_wait_{false}
+  , state_{connection_state::disconnected}
   , last_keepalive_{0}
   , last_activity_{0}
   , buffer_{new uint8_t[buffer_size]}
@@ -537,7 +537,7 @@ client::client(client&& rhs) noexcept
   , inactivity_timeout_(std::move(inactivity_timeout_))
   , filters_(std::move(rhs.filters_))
   , socket_{rhs.socket_}
-  , establish_wait_{rhs.establish_wait_}
+  , state_{rhs.state_}
   , last_keepalive_{rhs.last_keepalive_}
   , last_activity_{rhs.last_activity_}
   , buffer_(std::move(rhs.buffer_))
@@ -558,7 +558,7 @@ auto client::operator=(client&& rhs) noexcept -> client&
   inactivity_timeout_ = std::move(rhs.inactivity_timeout_);
   filters_ = std::move(rhs.filters_);
   socket_ = rhs.socket_;
-  establish_wait_ = rhs.establish_wait_;
+  state_ = rhs.state_;
   last_keepalive_ = rhs.last_keepalive_;
   last_activity_ = rhs.last_activity_;
   buffer_ = std::move(rhs.buffer_);
@@ -580,7 +580,7 @@ client::~client()
 
 auto client::add_filter(int station, std::string const& product, std::vector<std::string> const& moments) -> void
 {
-  if (socket_ != -1)
+  if (state_ != connection_state::disconnected)
     throw std::runtime_error{"rapic: add_filter called while connected"};
 
   // RPFILTER
@@ -599,7 +599,7 @@ auto client::add_filter(int station, std::string const& product, std::vector<std
 
 auto client::connect(std::string address, std::string service) -> void
 {
-  if (socket_ != -1)
+  if (state_ != connection_state::disconnected)
     throw std::runtime_error{"rapic: connect called while already connected"};
 
   // store connection details
@@ -659,10 +659,10 @@ auto client::connect(std::string address, std::string service) -> void
       freeaddrinfo(addr);
       throw std::system_error{errno, std::system_category(), "rapic: failed to establish connection"};
     }
-    establish_wait_ = true;
+    state_ = connection_state::in_progress;
   }
   else
-    establish_wait_ = false;
+    state_ = connection_state::established;
 
   // clean up the address list allocated by getaddrinfo
   freeaddrinfo(addr);
@@ -682,17 +682,16 @@ auto client::connect(std::string address, std::string service) -> void
 auto client::disconnect() -> void
 {
   if (socket_ != -1)
-  {
     close(socket_);
-    socket_ = -1;
-    last_keepalive_ = 0;
-    wbuffer_.clear();
-  }
+  socket_ = -1;
+  state_ = connection_state::disconnected;
+  last_keepalive_ = 0;
+  wbuffer_.clear();
 }
 
-auto client::connected() const -> bool
+auto client::connection_state() const -> rapic::connection_state
 {
-  return socket_ != -1;
+  return state_;
 }
 
 auto client::pollable_fd() const -> int
@@ -702,17 +701,17 @@ auto client::pollable_fd() const -> int
 
 auto client::poll_read() const -> bool
 {
-  return socket_ != -1 && !establish_wait_;
+  return state_ == connection_state::established;
 }
 
 auto client::poll_write() const -> bool
 {
-  return socket_ != -1 && (establish_wait_ || !wbuffer_.empty());
+  return state_ == connection_state::in_progress || !wbuffer_.empty();
 }
 
 auto client::poll(int timeout) const -> void
 {
-  if (socket_ == -1)
+  if (state_ == connection_state::disconnected)
     throw std::runtime_error{"rapic: attempt to poll while disconnected"};
 
   struct pollfd fds;
@@ -724,14 +723,14 @@ auto client::poll(int timeout) const -> void
 auto client::process_traffic() -> bool
 {
   // sanity check
-  if (socket_ == -1)
+  if (state_ == connection_state::disconnected)
     return false;
 
   // get current time
   auto now = time(NULL);
 
   // need to check our connection attempt progress
-  if (establish_wait_)
+  if (state_ == connection_state::in_progress)
   {
     int res = 0; socklen_t len = sizeof(res);
     if (getsockopt(socket_, SOL_SOCKET, SO_ERROR, &res, &len) < 0)
@@ -751,7 +750,7 @@ auto client::process_traffic() -> bool
       throw std::system_error{res, std::system_category(), "rapic: failed to establish connection (async)"};
     }
 
-    establish_wait_ = false;
+    state_ = connection_state::established;
   }
 
   // do we need to send a keepalive? (ie: RDRSTAT)

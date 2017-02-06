@@ -208,6 +208,14 @@ namespace rapic
     float       angle_resolution_;
   };
 
+  /// Possible states for a rapic connection
+  enum class connection_state
+  {
+      disconnected    ///< Not connected
+    , in_progress     ///< Socket is active but connection is still being established
+    , established     ///< Connection with server is established
+  };
+
   /// Rapic Data Server client connection manager
   /** This class is implemented with the expectation that it may be used in an environment where asynchronous I/O
    *  is desired.  As such, the most basic use of this class requires calling separate functions for checking
@@ -220,14 +228,14 @@ namespace rapic
    *    con.connect("myhost", "1234");
    *
    *    // wait for data to arrive
-   *    while (con.connected()) {
+   *    while (con.connection_state() != connection_state::disconnected) {
    *      con.poll();
-   *    
+   *
    *      // process messages from server
    *      bool again = true;
    *      while (again) {
    *        again = con.process_traffic();
-   *    
+   *
    *        // dequeue each message
    *        message_type type;
    *        while (con.dequeue(type)) {
@@ -252,7 +260,7 @@ namespace rapic
    *  - The connect() function must not be called at the same time as any other member function
    *
    * The const member functions may be called safely from any thread at any time.  It is suggested that the poll
-   * functions be called from the communications thread, while the syncrhonized function be called from the 
+   * functions be called from the communications thread, while the syncrhonized function be called from the
    * message handler thread for maximum consistency.
    */
   class client
@@ -283,8 +291,8 @@ namespace rapic
     /// Disconnect from the server
     auto disconnect() -> void;
 
-    /// Return true if a connection to the server is currently active
-    auto connected() const -> bool;
+    /// Return the current state of the socket connection to the server
+    auto connection_state() const -> rapic::connection_state;
 
     /// Get the file descriptor of the socket which may be used for multiplexed polling
     /** This function along with poll_read and poll_write are useful in an asynchronous I/O environment and you
@@ -344,25 +352,25 @@ namespace rapic
     auto buffer_find(std::string const& str, size_t& pos) const -> bool;
 
   private:
-    std::string         address_;           // remote hostname or address
-    std::string         service_;           // remote service or port number
-    time_t              keepalive_period_;  // time between sending keepalives
-    time_t              inactivity_timeout_;  // drop connection after this long without incoming data
-    filter_store        filters_;           // filter strings
-    int                 socket_;            // socket handle
-    bool                establish_wait_;    // are we waiting for socket connection to be established?
-    time_t              last_keepalive_;    // time of last keepalive send
-    time_t              last_activity_;     // time of last data received
+    std::string             address_;             // remote hostname or address
+    std::string             service_;             // remote service or port number
+    time_t                  keepalive_period_;    // time between sending keepalives
+    time_t                  inactivity_timeout_;  // drop connection after this long without incoming data
+    filter_store            filters_;             // filter strings
+    int                     socket_;              // socket handle
+    rapic::connection_state state_;               // current connection state
+    time_t                  last_keepalive_;      // time of last keepalive send
+    time_t                  last_activity_;       // time of last data received
 
-    std::string         wbuffer_;           // buffer of data waiting for output
+    std::string             wbuffer_;             // buffer of data waiting for output
 
-    buffer              buffer_;            // ring buffer to store packets off the wire
-    size_t              capacity_;          // total usable buffer capacity
-    std::atomic_size_t  wcount_;            // total bytes that have been written (wraps)
-    std::atomic_size_t  rcount_;            // total bytes that have been read (wraps)
+    buffer                  buffer_;              // ring buffer to store packets off the wire
+    size_t                  capacity_;            // total usable buffer capacity
+    std::atomic_size_t      wcount_;              // total bytes that have been written (wraps)
+    std::atomic_size_t      rcount_;              // total bytes that have been read (wraps)
 
-    message_type        cur_type_;          // type of currently dequeued message (awaiting decode)
-    size_t              cur_size_;          // size of currently dequeued message
+    message_type            cur_type_;            // type of currently dequeued message (awaiting decode)
+    size_t                  cur_size_;            // size of currently dequeued message
   };
 
   /// Write a list of rapic scans as an ODIM_H5 polar volume file
