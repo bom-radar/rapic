@@ -354,6 +354,8 @@ namespace rapic
     time_t              last_keepalive_;    // time of last keepalive send
     time_t              last_activity_;     // time of last data received
 
+    std::string         wbuffer_;           // buffer of data waiting for output
+
     buffer              buffer_;            // ring buffer to store packets off the wire
     size_t              capacity_;          // total usable buffer capacity
     std::atomic_size_t  wcount_;            // total bytes that have been written (wraps)
