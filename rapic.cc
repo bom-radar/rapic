@@ -19,6 +19,7 @@
 
 #include <strings.h>
 #include <sys/types.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>
@@ -720,24 +721,48 @@ auto client::poll(int timeout) const -> void
   ::poll(&fds, 1, timeout);
 }
 
+static auto is_socket_writeable(int socket) -> bool
+{
+  fd_set writefds;
+  FD_ZERO(&writefds);
+  FD_SET(socket, &writefds);
+
+  timeval tv;
+  tv.tv_sec = 0;
+  tv.tv_usec = 0;
+
+  int ret;
+  while ((ret = select(socket + 1, nullptr, &writefds, nullptr, &tv)) == -1)
+  {
+    if (errno != EINTR)
+      throw std::system_error{errno, std::system_category(), "rapic: select failure"};
+    tv.tv_sec = 0;
+    tv.tv_usec = 0;
+  }
+
+  return ret == 1;
+}
+
 auto client::process_traffic() -> bool
+try
 {
   // sanity check
   if (state_ == rapic::connection_state::disconnected)
     return false;
 
-  // get current time
-  auto now = time(NULL);
-
   // need to check our connection attempt progress
   if (state_ == rapic::connection_state::in_progress)
   {
+    /* SO_ERROR is only set once the socket is writeable, so manually check via select that it is.
+     * without this check clients can call process_traffic() before the socket is writeable and cause
+     * the connection to look established before it really is. */
+    if (!is_socket_writeable(socket_))
+      return false;
+
+    // get the socket error status
     int res = 0; socklen_t len = sizeof(res);
     if (getsockopt(socket_, SOL_SOCKET, SO_ERROR, &res, &len) < 0)
-    {
-      disconnect();
       throw std::system_error{errno, std::system_category(), "rapic: getsockopt failure"};
-    }
 
     // not connected yet?
     if (res == EINPROGRESS)
@@ -745,13 +770,13 @@ auto client::process_traffic() -> bool
 
     // okay, connection attempt is complete.  did it succeed?
     if (res < 0)
-    {
-      disconnect();
       throw std::system_error{res, std::system_category(), "rapic: failed to establish connection (async)"};
-    }
 
     state_ = rapic::connection_state::established;
   }
+
+  // get current time
+  auto now = time(NULL);
 
   // do we need to send a keepalive? (ie: RDRSTAT)
   if (now - last_keepalive_ > keepalive_period_)
@@ -773,11 +798,7 @@ auto client::process_traffic() -> bool
         break;
       }
       else if (errno != EINTR)
-      {
-        auto err = errno;
-        disconnect();
-        throw std::system_error{err, std::system_category(), "rapic: write failure"};
-      }
+        throw std::system_error{errno, std::system_category(), "rapic: write failure"};
     }
 
     // remove the written data from the buffer
@@ -818,10 +839,7 @@ auto client::process_traffic() -> bool
       {
         // check our inactivity timeout
         if (now - last_activity_ > inactivity_timeout_)
-        {
-          disconnect();
           throw std::runtime_error{"rapic: inactivity timeout"};
-        }
 
         return false;
       }
@@ -831,17 +849,20 @@ auto client::process_traffic() -> bool
         continue;
 
       // a real receive error - kill the connection
-      auto err = errno;
-      disconnect();
-      throw std::system_error{err, std::system_category(), "rapic: recv failure"};
+      throw std::system_error{errno, std::system_category(), "rapic: recv failure"};
     }
     else /* if (bytes == 0) */
     {
-      // connection has been closed
+      // connection has been closed normally by the remote side
       disconnect();
       return false;
     }
   }
+}
+catch (...)
+{
+  disconnect();
+  throw;
 }
 
 auto client::address() const -> std::string const&

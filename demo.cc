@@ -91,7 +91,7 @@ int main(int argc, char const* argv[])
     con.add_filter(70, "VOL");
 #endif
 
-    con.connect("cmssdev.bom.gov.au", "15555");
+    con.connect("rowlf.bom.gov.au", "15555");
 
     // loop forever as long as the connection stays open
     while (con.connection_state() != rapic::connection_state::disconnected)
