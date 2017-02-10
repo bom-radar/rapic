@@ -361,7 +361,10 @@ try
         {
           int count = in[pos++];
           if (count == 0)
+          {
+            --pos;
             break;
+          }
           if (bin + count > bins_)
             throw std::runtime_error{"scan data overflow (binary rle)"};
           for (int i = 0; i < count; ++i)
