@@ -83,7 +83,7 @@ namespace
     long        vidres = 0;
   };
 
-static std::map<std::string, quantity> const video_map = 
+static std::map<std::string, quantity> const video_map =
 {
     { "Refl",         { "DBZH",     "DBZV",     0.5f, -32.0f }}
   , { "UnCorRefl",    { "TH",       "TV",       0.5f, -32.0f }}
@@ -98,7 +98,7 @@ static std::map<std::string, quantity> const video_map =
 
 using odim_meta_fn = void (*)(header const&, meta_extra&);
 #define METAFN [](header const& h, meta_extra& m)
-static std::map<std::string, odim_meta_fn> const header_map = 
+static std::map<std::string, odim_meta_fn> const header_map =
 {
   // volume persistent metadata
     { "STNID",        METAFN { }} // ignored - special processing
@@ -117,14 +117,14 @@ static std::map<std::string, odim_meta_fn> const header_map =
   , { "HBEAMWIDTH",   METAFN { m.v.attributes()["beamwH"].set(h.get_real()); }}
   , { "VBEAMWIDTH",   METAFN { m.v.attributes()["beamwV"].set(h.get_real()); }}
   , { "FREQUENCY",    METAFN
-      { 
+      {
         auto freq = h.get_real();
         m.v.attributes()["rapic_FREQUENCY"].set(freq);
         m.v.attributes()["wavelength"].set((299792458.0 / (freq * 1000000.0)) * 100.0);
       }
     }
   , { "TXFREQUENCY",  METAFN
-      { 
+      {
         auto freq = h.get_real();
         m.v.attributes()["rapic_FREQUENCY"].set(freq);
         m.v.attributes()["wavelength"].set((299792458.0 / (freq * 1000000.0)) * 100.0);

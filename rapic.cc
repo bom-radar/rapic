@@ -544,6 +544,7 @@ client::client(client&& rhs) noexcept
   , state_{rhs.state_}
   , last_keepalive_{rhs.last_keepalive_}
   , last_activity_{rhs.last_activity_}
+  , wbuffer_(std::move(rhs.wbuffer_))
   , buffer_(std::move(rhs.buffer_))
   , capacity_{rhs.capacity_}
   , wcount_{rhs.wcount_.load()}
@@ -565,6 +566,7 @@ auto client::operator=(client&& rhs) noexcept -> client&
   state_ = rhs.state_;
   last_keepalive_ = rhs.last_keepalive_;
   last_activity_ = rhs.last_activity_;
+  wbuffer_ = std::move(rhs.wbuffer_);
   buffer_ = std::move(rhs.buffer_);
   capacity_ = rhs.capacity_;
   wcount_ = rhs.wcount_.load();
