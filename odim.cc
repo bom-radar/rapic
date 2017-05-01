@@ -92,8 +92,10 @@ static std::map<std::string, quantity> const video_map =
   , { "SpWdth",       { "WRADH",    "WRADV" }}
   , { "QCFLAGS",      { "QCFLAGS",  "QCFLAGS" }}
   , { "ZDR",          { "ZDR",      "ZDR" }}
-  , { "PHIDP",        { "PHIDP",    "PHIDP" }}
-  , { "RHOHV",        { "RHOHV",    "RHOHV" }}
+  , { "RhoHV",        { "RHOHV",    "RHOHV" }}
+  , { "PhiDP",        { "PHIDP",    "PHIDP" }}
+  , { "KDP",          { "KDP",      "KDP" }}
+  , { "SNR",          { "SNRH",     "SNRV" }}
 };
 
 using odim_meta_fn = void (*)(header const&, meta_extra&);
