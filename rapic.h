@@ -373,6 +373,8 @@ namespace rapic
     size_t                  cur_size_;            // size of currently dequeued message
   };
 
+  auto parse_volumetric_header(std::string const& product) -> time_t;
+
   /// Write a list of rapic scans as an ODIM_H5 polar volume file
   /**
    * This function assumes the following preconditions about the scan_set:

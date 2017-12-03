@@ -29,6 +29,7 @@ R"(Rapic to ODIM_H5 converter
 
 usage:
   rapic_to_odim [options] input.rapic output.h5
+  rapic_to_odim [options] -a input.rapic output_dir
 
 note:
   This program is a simple converter from a single rapic file into an ODIM_h5 volume.
@@ -42,13 +43,17 @@ available options:
 
   -q, --quiet
       Suppress output of warnings during conversion process
+
+  -a, --archive
+      Convert a multi-scan rapic archive file
 )";
 
-static const char* short_options = "hq";
+static const char* short_options = "hqa";
 static struct option long_options[] =
 {
-    { "help",  no_argument, 0, 'h' }
-  , { "quiet", no_argument, 0, 'q' }
+    { "help",    no_argument, 0, 'h' }
+  , { "quiet",   no_argument, 0, 'q' }
+  , { "archive", no_argument, 0, 'a' }
   , { 0, 0, 0, 0 }
 };
 
@@ -85,6 +90,8 @@ auto log_function(char const* msg) -> void
 
 int main(int argc, char* argv[])
 {
+  bool archive = false;
+
   // process options
   while (true)
   {
@@ -99,6 +106,9 @@ int main(int argc, char* argv[])
       return EXIT_SUCCESS;
     case 'q':
       quiet = true;
+      break;
+    case 'a':
+      archive = true;
       break;
     case '?':
       std::cerr << try_again;
@@ -160,8 +170,46 @@ int main(int argc, char* argv[])
       i += scans.back().decode(&buf[i], len - i);
     }
 
-    // convert the list of scans into a volume
-    rapic::write_odim_h5_volume(path_output, scans, log_function);
+    if (archive)
+    {
+      while (!scans.empty())
+      {
+        // find end of this volume
+        auto end = scans.begin();
+        while (end != scans.end() && end->product() == scans.begin()->product())
+          ++end;
+
+        // splice these scans into a separate list
+        std::list<rapic::scan> vol_scans;
+        vol_scans.splice(vol_scans.begin(), scans, scans.begin(), end);
+
+        // build a file name for this volume
+        auto t = rapic::parse_volumetric_header(vol_scans.begin()->product());
+        auto tmm = gmtime(&t);
+        char path[BUFSIZ];
+        snprintf(
+              path
+            , BUFSIZ
+            , "%s/%d_%04d%02d%02d_%02d%02d00.pvol.h5"
+            , path_output
+            , vol_scans.begin()->station_id()
+            , tmm->tm_year + 1900
+            , tmm->tm_mon + 1
+            , tmm->tm_mday
+            , tmm->tm_hour
+            , tmm->tm_min);
+
+        std::cout << "writing " << path << std::endl;
+
+        // convert the list of scans into a volume
+        rapic::write_odim_h5_volume(path, vol_scans, log_function);
+      }
+    }
+    else
+    {
+      // convert the list of scans into a volume
+      rapic::write_odim_h5_volume(path_output, scans, log_function);
+    }
   }
   catch (std::exception& err)
   {

@@ -239,9 +239,35 @@ static auto angle_to_index(scan const& s, float angle) -> int
   while (angle < s.angle_min())
     angle += 360.0f;
   int ray = std::lround((angle - s.angle_min()) / s.angle_resolution());
+#if 1
   if (ray < 0 || ray >= s.rays() || std::abs(remainder(angle - s.angle_min(), s.angle_resolution())) > 0.001)
     throw std::runtime_error{"invalid azimuth angle specified by ray"};
+#else
+  ray %= 360; // HACK
+  if (ray < 0 || ray >= s.rays())
+  {
+    printf("ray %d of %d, angle %f angle_min %f angle_res %f, remainder %f\n"
+           , ray, s.rays()
+           , angle, s.angle_min(), s.angle_resolution()
+           , remainder(angle - s.angle_min(), s.angle_resolution()));
+    throw std::runtime_error{"invalid azimuth angle specified by ray"};
+  }
+#endif
   return ray;
+}
+
+auto rapic::parse_volumetric_header(std::string const& product) -> time_t
+{
+  // use out-of-bounts mday to convert day of year into correct day
+  struct tm t;
+  if (sscanf(product.c_str(), "VOLUMETRIC [%02d%02d%03d%02d]", &t.tm_hour, &t.tm_min, &t.tm_mday, &t.tm_year) != 4)
+    throw std::runtime_error{"invalid PRODUCT header"};
+  t.tm_sec = 0;
+  t.tm_mon = 0; // january
+  if (t.tm_year < 70) // cope with two digit year, convert to years since 1900
+    t.tm_year += 100;
+  t.tm_isdst = -1;
+  return timegm(&t);
 }
 
 auto rapic::write_odim_h5_volume(
@@ -265,20 +291,8 @@ auto rapic::write_odim_h5_volume(
   auto hscan = hvol.scan_append();
 
   // write the special volume level headers
-  {
-    // use the PRODUCT [xxx] timestamp for the overall product time
-    // use out-of-bounts mday to convert day of year into correct day
-    struct tm t;
-    if (sscanf(scan_set.front().product().c_str(), "VOLUMETRIC [%02d%02d%03d%02d]", &t.tm_hour, &t.tm_min, &t.tm_mday, &t.tm_year) != 4)
-      throw std::runtime_error{"invalid PRODUCT header"};
-    t.tm_sec = 0;
-    t.tm_mon = 0; // january
-    if (t.tm_year < 70) // cope with two digit year, convert to years since 1900
-      t.tm_year += 100;
-    t.tm_isdst = -1;
-    vol_time = timegm(&t);
-    hvol.set_date_time(vol_time);
-  }
+  // use the PRODUCT [xxx] timestamp for the overall product time
+  hvol.set_date_time(parse_volumetric_header(scan_set.front().product()));
   {
     int pos = 0;
     char buf[128];
