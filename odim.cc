@@ -276,7 +276,6 @@ auto rapic::write_odim_h5_volume(
     , std::function<void(char const*)> log_fn
     ) -> time_t
 {
-  time_t vol_time = 0;
   std::vector<uint8_t> ibuf;
   std::vector<int> level_convert;
 
@@ -292,7 +291,8 @@ auto rapic::write_odim_h5_volume(
 
   // write the special volume level headers
   // use the PRODUCT [xxx] timestamp for the overall product time
-  hvol.set_date_time(parse_volumetric_header(scan_set.front().product()));
+  auto vol_time = parse_volumetric_header(scan_set.front().product());
+  hvol.set_date_time(vol_time);
   {
     int pos = 0;
     char buf[128];
